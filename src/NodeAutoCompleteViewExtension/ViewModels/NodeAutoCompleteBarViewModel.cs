@@ -205,7 +205,19 @@ namespace Dynamo.NodeAutoComplete.ViewModels
         internal void ToggleUndoRedoLocked(bool toggle = true)
         {
             var node = PortViewModel.NodeViewModel;
-            //unlock undo/redo
+            var runSettingsViewModel = node.WorkspaceViewModel.RunSettingsViewModel;
+
+            //toggle run while viewing clusters, only if user is in automatic run mode
+            if (runSettingsViewModel.Model.RunType == RunType.Automatic)
+            {
+                runSettingsViewModel.Model.RunEnabled = !toggle;
+                if (!toggle)
+                {
+                    node.WorkspaceViewModel.Model.RequestRun();
+                }
+            }
+
+            //toggle undo/redo
             node.WorkspaceViewModel.Model.IsUndoRedoLocked = toggle;
             //allow for undo/redo again
             node.DynamoViewModel.RaiseCanExecuteUndoRedo();
@@ -903,7 +915,7 @@ namespace Dynamo.NodeAutoComplete.ViewModels
             NodeAutoCompleteUtilities.PostAutoLayoutNodes(wsViewModel.DynamoViewModel.CurrentSpace, node.NodeModel, clusterNodesModel.Select(x => x.NodeModel), false, false, false, finalizer);
 
             //record all node and wire creation as one undo
-            DynamoModel.RecordUndoModels(wsViewModel.Model, newNodesAndWires);
+            DynamoModel.RecordUndoModels(wsViewModel.Model, newNodesAndWires.Where(n => n != null).ToList());
         }
 
         /// <summary>
