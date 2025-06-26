@@ -133,6 +133,7 @@ namespace Dynamo.Wpf.Utilities
         {
             try
             {
+                List<string> messages = [];
                 foreach (var nodeElement in nodes)
                 {
                     string creationName = nodeElement.NodeType;
@@ -141,13 +142,36 @@ namespace Dynamo.Wpf.Utilities
                     string? initialValue = nodeElement.InitialValue;
 
                     string result = CreateNode(creationName, x, y, initialValue);
+                    messages.Add(result);
+                    if (result.StartsWith("Error"))
+                    {
+                        return $"Failed to create node: {result}";
+                    }
+                }
+                return string.Join("\n", messages);
+            }
+            catch (Exception ex)
+            {
+                return $"Error creating multiple nodes: {ex.Message}";
+            }
+        }
+
+        public static string ConnectMultipleNodes(NodeConnectionInfo[] connections)
+        {
+            try
+            {
+                foreach (var connection in connections)
+                {
+                    string result = ConnectNodes(
+                        connection.sourceNodeId, connection.targetNodeId,
+                        connection.sourcePortIndex, connection.targetPortIndex);
                     if (result.StartsWith("Error"))
                     {
                         return $"Failed to create node: {result}";
                     }
                 }
 
-                return "All nodes created successfully.";
+                return GetWorkspaceInfo();
             }
             catch (Exception ex)
             {
@@ -176,6 +200,7 @@ namespace Dynamo.Wpf.Utilities
             // Use OnRequestDispatcherInvoke for thread-safe ConnectorModel creation
             DynamoModel.OnRequestDispatcherInvoke(() =>
             {
+                var guids = _currentWorkspace.Nodes.Select(x => x.GUID).ToList();
                 connector = ConnectorModel.Make(sourceNode, targetNode, sourcePortIndex, targetPortIndex);
             });
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Anthropic.SDK;
 using Anthropic.SDK.Common;
 using Anthropic.SDK.Constants;
@@ -20,6 +21,16 @@ namespace Dynamo.Wpf.Utilities
             public double Y { get; set; }
             [FunctionProperty("Initial value for the node (optional)", false)]
             public string? InitialValue { get; set; }
+        }
+        public class NodeConnectionInfo
+        {
+            [FunctionProperty("ID of the source node", true)] public string sourceNodeId { get; set; }
+
+            [FunctionProperty("ID of the target node", true)] public string targetNodeId { get; set; }
+
+            [FunctionProperty("Output port index of the source node (default: 0)", false)] public int sourcePortIndex { get; set; }
+
+            [FunctionProperty("Input port index of the target node (default: 0)", false)] public int targetPortIndex { get; set; }
         }
         public static async void DoYourMagic(DynamoViewModel dynamoViewModel, string prompt)
         {
@@ -50,14 +61,21 @@ namespace Dynamo.Wpf.Utilities
                 "Create multiple nodes in the Dynamo workspace at specified coordinates"),
 
             // connect_nodes
-            Anthropic.SDK.Common.Tool.FromFunc("connect_nodes",
+            /*Anthropic.SDK.Common.Tool.FromFunc("connect_nodes",
                 (
                     [FunctionParameter("ID of the source node", true)] string sourceNodeId,
                     [FunctionParameter("ID of the target node", true)] string targetNodeId,
                     [FunctionParameter("Output port index of the source node (default: 0)", false)] int sourcePortIndex,
                     [FunctionParameter("Input port index of the target node (default: 0)", false)] int targetPortIndex
                 ) => WorkspaceTools.ConnectNodes(sourceNodeId, targetNodeId, sourcePortIndex, targetPortIndex),
-                "Connect the output of one node to the input of another node"),
+                "Connect the output of one node to the input of another node"),*/
+
+            // connect_multiple_nodes
+            Anthropic.SDK.Common.Tool.FromFunc("connect_multiple_nodes",
+                (
+                    [FunctionParameter("Array of node connections to be created", true)] NodeConnectionInfo[] nodes
+                ) => WorkspaceTools.ConnectMultipleNodes(nodes),
+                "Connect the output of one node to the input of another node for each node connction"),
 
             // delete_node
             /*Anthropic.SDK.Common.Tool.FromFunc("delete_node",
@@ -89,13 +107,18 @@ namespace Dynamo.Wpf.Utilities
                 () => WorkspaceTools.GetAllAvailableNodes(),
                 "Get a list of available nodes that can be created in Dynamo"),*/
         };
-
+            const string reflectionCache = "nodes.json";
+            if (!File.Exists(reflectionCache))
+            {
+                File.WriteAllText(reflectionCache, WorkspaceTools.GetAllAvailableNodes());
+            }
+            var allnodes = File.ReadAllText(reflectionCache);
             var parameters = new MessageParameters()
             {
                 System = new List<SystemMessage>
                 {
                     new SystemMessage("You are a dynamo assistant to create graphs in dynamoBIM. Consider the following API documentation: "),
-                    new SystemMessage(WorkspaceTools.GetAllAvailableNodes()),
+                    new SystemMessage(allnodes),
                 },
                 Messages = messages,
                 MaxTokens = 4096,
@@ -103,8 +126,7 @@ namespace Dynamo.Wpf.Utilities
                 Stream = false,
                 //Temperature = 1.0m,
                 Tools = tools,
-                PromptCaching = PromptCacheType.AutomaticToolsAndSystem
-                //ToolChoice = new ToolChoice { Name = "get_all_available_nodes", Type=ToolChoiceType.Tool }
+                PromptCaching = PromptCacheType.AutomaticToolsAndSystem,
             };
             while (true)
             {
