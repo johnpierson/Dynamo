@@ -106,11 +106,14 @@ namespace Dynamo.Wpf.Utilities
 
                 DynamoModel.OnRequestDispatcherInvoke(new Action(() =>
                 {
-                    nodeModel = _dynamoModel.CreateNodeFromNameOrType(Guid.NewGuid(), creationName, false);
+                    var id = Guid.NewGuid();
+                    nodeModel = _dynamoModel.CreateNodeFromNameOrType(id, creationName, false);
                     nodeModel.X = x;
                     nodeModel.Y = y;
 
                     _currentWorkspace.AddAndRegisterNode(nodeModel);
+
+                    SetNodeValue(id.ToString(), initialValue);
                 }));
 
                 if (nodeModel is null)

@@ -77,33 +77,38 @@ namespace Dynamo.Wpf.Utilities
                 "Run/execute the current Dynamo graph and return execution results"),*/
 
             // set_node_value
-            Anthropic.SDK.Common.Tool.FromFunc("set_node_value",
+            /*Anthropic.SDK.Common.Tool.FromFunc("set_node_value",
                 (
                     [FunctionParameter("ID of the node to modify", true)] string nodeId,
                     [FunctionParameter("New value for the node", true)] string value
                 ) => WorkspaceTools.SetNodeValue(nodeId, value),
-                "Set the value of an input node in the workspace"),
+                "Set the value of an input node in the workspace"),*/
 
             // get_all_available_nodes
-            Anthropic.SDK.Common.Tool.FromFunc("get_all_available_nodes",
+            /*Anthropic.SDK.Common.Tool.FromFunc("get_all_available_nodes",
                 () => WorkspaceTools.GetAllAvailableNodes(),
-                "Get a list of available nodes that can be created in Dynamo"),
+                "Get a list of available nodes that can be created in Dynamo"),*/
         };
 
             var parameters = new MessageParameters()
             {
+                System = new List<SystemMessage>
+                {
+                    new SystemMessage("You are a dynamo assistant to create graphs in dynamoBIM. Consider the following API documentation: "),
+                    new SystemMessage(WorkspaceTools.GetAllAvailableNodes()),
+                },
                 Messages = messages,
                 MaxTokens = 4096,
                 Model = AnthropicModels.Claude4Sonnet,
                 Stream = false,
                 //Temperature = 1.0m,
                 Tools = tools,
-                ToolChoice = new ToolChoice { Name = "get_all_available_nodes", Type=ToolChoiceType.Tool }
+                PromptCaching = PromptCacheType.AutomaticToolsAndSystem
+                //ToolChoice = new ToolChoice { Name = "get_all_available_nodes", Type=ToolChoiceType.Tool }
             };
             while (true)
             {
                 var res = await client.Messages.GetClaudeMessageAsync(parameters);
-                parameters.ToolChoice = null;
 
                 messages.Add(res.Message);
 
@@ -119,14 +124,6 @@ namespace Dynamo.Wpf.Utilities
                     messages.Add(new Message(toolCall, response));
                 }
             }
-
-            //ask followup question in chain
-            messages.Add(new Message(RoleType.User, "Who were the starting pitchers for the Dodgers?"));
-
-            var finalResult = await client.Messages.GetClaudeMessageAsync(parameters);
-
-            //print result
-            Console.WriteLine(finalResult.Message.ToString());
         }
     }
 }
