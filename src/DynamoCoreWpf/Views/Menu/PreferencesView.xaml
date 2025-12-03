@@ -1615,7 +1615,7 @@
                                                Style="{StaticResource QuestionIcon}"
                                                ToolTipService.ShowDuration="30000">
                                                 <Image.ToolTip>
-                                                    <ToolTip Content="Use Monaco Editor (VS Code's editor) as an alternative to AvalonEdit for code completion. Supports Python nodes, C# nodes, and CodeBlock nodes. Requires restart to take effect." Style="{StaticResource GenericToolTipLight}"/>
+                                                    <ToolTip Content="Use Monaco Editor (VS Code's editor) as an alternative to AvalonEdit for code editing. Currently supports Python nodes and C# nodes. Requires restart to take effect." Style="{StaticResource GenericToolTipLight}"/>
                                                 </Image.ToolTip>
                                             </Image>
                                         </Label>
