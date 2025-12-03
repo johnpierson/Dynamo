@@ -331,6 +331,7 @@
     <EmbeddedResource Include="Controls\Docs\zh-TW\NodeAutocompleteDocumentation.html" />
     <EmbeddedResource Include="Packages\SplashScreen\build\index.bundle.js" />
     <EmbeddedResource Include="Packages\SplashScreen\build\index.html" />
+    <EmbeddedResource Include="Views\MonacoEditor\MonacoEditorHost.html" />
     <EmbeddedResource Include="Properties\Resources.en-GB.resx" />
     <EmbeddedResource Include="ViewModels\PackageManager\Docs\cs-CZ\PublishPackageDocumentation.html" />
     <EmbeddedResource Include="ViewModels\PackageManager\Docs\de-DE\PublishPackageDocumentation.html" />
@@ -779,6 +780,9 @@
     <Compile Include="Views\FileTrust\FileTrustWarning.xaml.cs" />
     <Compile Include="Views\CodeCompletion\CodeCompletionEditor.xaml.cs">
       <DependentUpon>CodeCompletionEditor.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Views\MonacoEditor\MonacoCodeEditor.xaml.cs">
+      <DependentUpon>MonacoCodeEditor.xaml</DependentUpon>
     </Compile>
     <Compile Include="Views\GuidedTour\ExitGuideWindow.xaml.cs">
       <DependentUpon>ExitGuideWindow.xaml</DependentUpon>
@@ -1852,6 +1856,10 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="Views\CodeCompletion\CodeCompletionEditor.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="Views\MonacoEditor\MonacoCodeEditor.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>

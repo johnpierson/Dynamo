@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -40,6 +41,8 @@ namespace Dynamo.UI.Controls
         private DynamoViewModel dynamoViewModel;
         private CompletionWindow completionWindow;
         private CodeCompletionMethodInsightWindow insightWindow;
+        private bool useMonacoEditor;
+        private MonacoCodeEditor MonacoEditor;
 
         /// <summary>
         /// Create CodeCOmpletionEditor with NodeViewModel
@@ -53,22 +56,160 @@ namespace Dynamo.UI.Controls
             this.nodeViewModel = nodeView.ViewModel;
             this.DataContext = nodeViewModel.NodeModel;
             this.dynamoViewModel = nodeViewModel.DynamoViewModel;
+            
+            // Check if Monaco Editor debug mode is enabled
+            useMonacoEditor = DebugModes.IsEnabled("UseMonacoEditor");
+            
+            if (useMonacoEditor)
+            {
+                InitializeMonacoEditor(nodeView);
+            }
+            else
+            {
+                InitializeAvalonEditor();
+            }
+        }
+
+        private void InitializeAvalonEditor()
+        {
             this.dynamoViewModel.PreferencesViewModel.PropertyChanged += OnPreferencesViewModelPropertyChanged;
             this.InnerTextEditor.TextChanged += OnTextChanged;
-            this.InnerTextEditor.TextArea.GotFocus+= OnTextAreaGotFocus; 
+            this.InnerTextEditor.TextArea.GotFocus += OnTextAreaGotFocus;
             this.InnerTextEditor.TextArea.LostFocus += OnTextAreaLostFocus;
             this.InnerTextEditor.TextArea.TextEntering += OnTextAreaTextEntering;
             this.InnerTextEditor.TextArea.TextEntered += OnTextAreaTextEntered;
 
             CodeHighlightingRuleFactory.CreateHighlightingRules(InnerTextEditor, dynamoViewModel.EngineController);
+            
+            // Show Avalon editor, hide Monaco
+            AvalonEditorBorder.Visibility = Visibility.Visible;
+            MonacoEditorBorder.Visibility = Visibility.Collapsed;
+        }
+
+        private void InitializeMonacoEditor(NodeView nodeView)
+        {
+            // Hide Avalon editor, show Monaco
+            AvalonEditorBorder.Visibility = Visibility.Collapsed;
+            MonacoEditorBorder.Visibility = Visibility.Visible;
+
+            // Initialize Monaco editor with NodeView
+            MonacoEditor = new MonacoCodeEditor(nodeView);
+            MonacoEditor.HorizontalAlignment = HorizontalAlignment.Stretch;
+            MonacoEditor.VerticalAlignment = VerticalAlignment.Stretch;
+            MonacoEditorBorder.Child = MonacoEditor;
+
+            // Set language based on node type
+            var language = DetectLanguage();
+            MonacoEditor.Language = language;
+
+            // Wire up Monaco editor events
+            MonacoEditor.ContentChanged += OnMonacoContentChanged;
+            MonacoEditor.EditorFocused += OnMonacoEditorFocused;
+            MonacoEditor.EditorBlurred += OnMonacoEditorBlurred;
+            MonacoEditor.EditorReady += OnMonacoEditorReady;
+
+            // Set initial content if available
+            if (nodeViewModel?.NodeModel != null)
+            {
+                var codeProperty = nodeViewModel.NodeModel.GetType().GetProperty("Code");
+                if (codeProperty != null)
+                {
+                    var code = codeProperty.GetValue(nodeViewModel.NodeModel) as string;
+                    if (!string.IsNullOrEmpty(code))
+                    {
+                        _ = MonacoEditor.SetContentAsync(code);
+                    }
+                }
+            }
+
+            // Apply preferences
+            _ = ApplyMonacoPreferencesAsync();
+        }
+
+        private MonacoLanguage DetectLanguage()
+        {
+            if (nodeViewModel?.NodeModel == null)
+                return MonacoLanguage.CodeBlock;
+
+            var nodeType = nodeViewModel.NodeModel.GetType();
+            var nodeTypeName = nodeType.Name;
+            var nodeTypeNamespace = nodeType.Namespace;
+
+            // Check for Python nodes
+            if (nodeTypeNamespace != null && nodeTypeNamespace.Contains("PythonNodeModels"))
+            {
+                return MonacoLanguage.Python;
+            }
+
+            // Check for CodeBlock nodes
+            if (nodeTypeName == "CodeBlockNodeModel" || nodeTypeName == "CodeBlock")
+            {
+                return MonacoLanguage.CodeBlock;
+            }
+
+            // Check for C# nodes (placeholder - can be extended when C# nodes are identified)
+            if (nodeTypeName.Contains("CSharp") || nodeTypeName.Contains("CSNode") || 
+                nodeTypeNamespace != null && nodeTypeNamespace.Contains("CSharp"))
+            {
+                return MonacoLanguage.CSharp;
+            }
+
+            // Default to CodeBlock for DesignScript
+            return MonacoLanguage.CodeBlock;
+        }
+
+        private async Task ApplyMonacoPreferencesAsync()
+        {
+            if (MonacoEditor == null || !MonacoEditor.IsEditorReady)
+                return;
+
+            try
+            {
+                await MonacoEditor.SetLineNumbersAsync(dynamoViewModel.PreferencesViewModel.ShowCodeBlockLineNumber);
+                await MonacoEditor.SetFontSizeAsync(13); // Match Avalon editor font size
+            }
+            catch (Exception)
+            {
+                // Silently handle errors during preference application
+            }
+        }
+
+        private void OnMonacoEditorReady(object sender, EventArgs e)
+        {
+            _ = ApplyMonacoPreferencesAsync();
+        }
+
+        private void OnMonacoContentChanged(object sender, MonacoContentChangedEventArgs e)
+        {
+            if (WatermarkLabel.Visibility == Visibility.Visible)
+            {
+                WatermarkLabel.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void OnMonacoEditorFocused(object sender, EventArgs e)
+        {
+            OnTextAreaGotFocus(sender, new RoutedEventArgs());
+        }
+
+        private void OnMonacoEditorBlurred(object sender, EventArgs e)
+        {
+            OnCommitChange();
         }
 
         /// <summary>
         /// Set focus to the editor.
         /// </summary>
-        public void SetFocus()
+        public async void SetFocus()
         {
-            InnerTextEditor.Focus();
+            if (useMonacoEditor && MonacoEditor != null)
+            {
+                await MonacoEditor.FocusEditorAsync();
+            }
+            else
+            {
+                InnerTextEditor.Focus();
+            }
         }
 
         #region Dependency Property
@@ -103,7 +244,14 @@ namespace Dynamo.UI.Controls
             }
             set
             {
-                InnerTextEditor.Text = value;
+                if (useMonacoEditor && MonacoEditor != null)
+                {
+                    _ = MonacoEditor.SetContentAsync(value ?? string.Empty);
+                }
+                else
+                {
+                    InnerTextEditor.Text = value;
+                }
             }
         }
 
@@ -136,14 +284,24 @@ namespace Dynamo.UI.Controls
         /// Update the value of specified property of node to the input code.
         /// </summary>
         /// <param name="property"></param>
-        protected void UpdateNodeValue(string property)
+        protected async void UpdateNodeValue(string property)
         {
+            string code;
+            if (useMonacoEditor && MonacoEditor != null)
+            {
+                code = await MonacoEditor.GetContentAsync();
+            }
+            else
+            {
+                code = InnerTextEditor.Text;
+            }
+
             dynamoViewModel.ExecuteCommand(
                 new Models.DynamoModel.UpdateModelValueCommand(
                     nodeViewModel.WorkspaceViewModel.Model.Guid,
                     nodeViewModel.NodeModel.GUID, 
                     property,
-                    InnerTextEditor.Text));
+                    code));
         }
 
         /// <summary>
@@ -193,11 +351,18 @@ namespace Dynamo.UI.Controls
             }
         }
 
-        private void OnPreferencesViewModelPropertyChanged(object sender, EventArgs e)
+        private async void OnPreferencesViewModelPropertyChanged(object sender, EventArgs e)
         {
             if ((e as PropertyChangedEventArgs).PropertyName == nameof(dynamoViewModel.PreferencesViewModel.ShowCodeBlockLineNumber))
             {
-                this.InnerTextEditor.ShowLineNumbers = dynamoViewModel.PreferencesViewModel.ShowCodeBlockLineNumber;
+                if (useMonacoEditor && MonacoEditor != null)
+                {
+                    await MonacoEditor.SetLineNumbersAsync(dynamoViewModel.PreferencesViewModel.ShowCodeBlockLineNumber);
+                }
+                else
+                {
+                    this.InnerTextEditor.ShowLineNumbers = dynamoViewModel.PreferencesViewModel.ShowCodeBlockLineNumber;
+                }
             }
         }
 
@@ -404,7 +569,20 @@ namespace Dynamo.UI.Controls
 
         internal void Dispose()
         {
-            this.dynamoViewModel.PreferencesViewModel.PropertyChanged -= OnPreferencesViewModelPropertyChanged;
+            if (!useMonacoEditor)
+            {
+                this.dynamoViewModel.PreferencesViewModel.PropertyChanged -= OnPreferencesViewModelPropertyChanged;
+            }
+            
+            if (MonacoEditor != null)
+            {
+                MonacoEditor.ContentChanged -= OnMonacoContentChanged;
+                MonacoEditor.EditorFocused -= OnMonacoEditorFocused;
+                MonacoEditor.EditorBlurred -= OnMonacoEditorBlurred;
+                MonacoEditor.EditorReady -= OnMonacoEditorReady;
+                MonacoEditor.Dispose();
+                MonacoEditor = null;
+            }
         }
     }
 }

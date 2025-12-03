@@ -1,0 +1,32 @@
+<UserControl x:Class="Dynamo.UI.Controls.MonacoCodeEditor"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:ui="clr-namespace:Dynamo.UI"
+             d:DesignHeight="300"
+             d:DesignWidth="500"
+             mc:Ignorable="d"
+             Loaded="OnLoaded"
+             Unloaded="OnUnloaded">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <!-- FIX: Use standard ResourceDictionary if SharedResourceDictionary is not defined -->
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="{x:Static ui:SharedDictionaryManager.DynamoModernDictionaryUri}" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <Grid x:Name="HostGrid" Background="#252526">
+        <!-- Loading indicator shown while Monaco initializes -->
+        <TextBlock x:Name="LoadingText"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   FontFamily="{StaticResource SourceCodePro}"
+                   FontSize="13px"
+                   Foreground="#AAAAAA"
+                   Text="Loading Monaco Editor..."
+                   Visibility="Visible" />
+    </Grid>
+</UserControl>
+

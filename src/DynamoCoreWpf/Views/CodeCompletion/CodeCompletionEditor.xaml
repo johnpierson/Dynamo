@@ -16,7 +16,9 @@
         </ResourceDictionary>
     </UserControl.Resources>
     <Grid>
-        <Border Padding="10,5,10,6"
+        <!-- AvalonEdit Editor (default) -->
+        <Border x:Name="AvalonEditorBorder"
+                Padding="10,5,10,6"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Stretch"
                 BorderBrush="#959595"
@@ -36,6 +38,20 @@
                                    ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                    WordWrap="False" />
         </Border>
+        
+        <!-- Monaco Editor (debug mode only) -->
+        <Border x:Name="MonacoEditorBorder"
+                Padding="10,5,10,6"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                BorderBrush="#959595"
+                BorderThickness="1"
+                CornerRadius="3"
+                SnapsToDevicePixels="True"
+                Visibility="Collapsed">
+            <!-- Monaco editor will be added programmatically -->
+        </Border>
+        
         <TextBlock x:Name="WatermarkLabel"
                    Margin="0,5,0,0"
                    Padding="11,3"
