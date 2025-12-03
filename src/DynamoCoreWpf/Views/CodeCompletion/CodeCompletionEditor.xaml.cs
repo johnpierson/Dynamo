@@ -57,8 +57,8 @@ namespace Dynamo.UI.Controls
             this.DataContext = nodeViewModel.NodeModel;
             this.dynamoViewModel = nodeViewModel.DynamoViewModel;
             
-            // Check if Monaco Editor debug mode is enabled
-            useMonacoEditor = DebugModes.IsEnabled("UseMonacoEditor");
+            // Check if Monaco Editor preference is enabled
+            useMonacoEditor = dynamoViewModel.PreferenceSettings.UseMonacoEditor;
             
             if (useMonacoEditor)
             {

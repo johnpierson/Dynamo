@@ -346,7 +346,8 @@
                 </StackPanel>
 
                 <!-- Avalon Editor --> 
-                <Border Margin="0,0,0,0"
+                <Border Name="AvalonEditorBorder"
+                        Margin="0,0,0,0"
                         Padding="20 0 20 10"
                         BorderThickness="0"
                         Background="{StaticResource PreferencesWindowBackgroundColor}"
@@ -362,6 +363,17 @@
                                            HorizontalScrollBarVisibility="Disabled"
                                            PreviewMouseWheel="EditorBox_PreviewMouseWheel"
                                            PreviewKeyDown="EditText_OnPreviewKeyDown"/>
+                </Border>
+                
+                <!-- Monaco Editor (debug mode only) -->
+                <Border Name="MonacoEditorBorder"
+                        Margin="0,0,0,0"
+                        Padding="20 0 20 10"
+                        BorderThickness="0"
+                        Background="{StaticResource PreferencesWindowBackgroundColor}"
+                        Grid.Row="3"
+                        Visibility="Collapsed">
+                    <!-- Monaco editor will be added programmatically -->
                 </Border>
  
                 <!-- Run and Close Button -->

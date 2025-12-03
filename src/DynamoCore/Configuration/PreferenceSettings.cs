@@ -250,6 +250,12 @@ namespace Dynamo.Configuration
         public bool ShowCodeBlockLineNumber { get; set; }
 
         /// <summary>
+        /// Indicates if Monaco Editor (VS Code's editor) should be used instead of AvalonEdit for code editing.
+        /// Supports Python nodes, C# nodes, and CodeBlock nodes.
+        /// </summary>
+        public bool UseMonacoEditor { get; set; }
+
+        /// <summary>
         /// Should connectors be visible?
         /// </summary>
         public bool ShowConnector { get; set; }
@@ -1026,6 +1032,7 @@ namespace Dynamo.Configuration
             ConsoleHeight = 0;
             ShowPreviewBubbles = true;
             ShowCodeBlockLineNumber = true;
+            UseMonacoEditor = false;
             ShowConnector = true;
             ShowConnectorToolTip = true;
             ConnectorType = ConnectorType.BEZIER;

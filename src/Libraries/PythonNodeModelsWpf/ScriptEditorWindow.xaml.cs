@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -18,6 +19,7 @@ using Dynamo.Utilities;
 using Dynamo.ViewModels;
 using Dynamo.Wpf.Views;
 using Dynamo.Wpf.Windows;
+using Dynamo.UI.Controls;
 using ICSharpCode.AvalonEdit;
 using ICSharpCode.AvalonEdit.CodeCompletion;
 using ICSharpCode.AvalonEdit.Folding;
@@ -54,6 +56,8 @@ namespace PythonNodeModelsWpf
         private const double pythonZoomScalingSliderMaximum = 300d;
         private const double pythonZoomScalingSliderMinimum = 25d;
         private bool isSaved = true;
+        private bool useMonacoEditor;
+        private MonacoCodeEditor MonacoEditor;
         #endregion
 
         /// <summary>
@@ -65,8 +69,32 @@ namespace PythonNodeModelsWpf
             set
             {
                 isSaved = value;
-                editText.IsModified = !IsSaved;
+                if (!useMonacoEditor)
+                {
+                    editText.IsModified = !IsSaved;
+                }
                 NodeModel.ScriptContentSaved = isSaved;
+            }
+        }
+
+        private async Task<string> GetEditorTextAsync()
+        {
+            if (useMonacoEditor && MonacoEditor != null)
+            {
+                return await MonacoEditor.GetContentAsync();
+            }
+            return editText.Text;
+        }
+
+        private async Task SetEditorTextAsync(string text)
+        {
+            if (useMonacoEditor && MonacoEditor != null)
+            {
+                await MonacoEditor.SetContentAsync(text);
+            }
+            else
+            {
+                editText.Text = text;
             }
         }
 
@@ -131,6 +159,49 @@ namespace PythonNodeModelsWpf
             boundNodeId = nodeGuid;
             propertyName = propName;
 
+            // Check if Monaco Editor preference is enabled
+            useMonacoEditor = dynamoViewModel.PreferenceSettings.UseMonacoEditor;
+
+            if (useMonacoEditor)
+            {
+                InitializeMonacoEditor(propValue);
+            }
+            else
+            {
+                InitializeAvalonEditor(propValue);
+            }
+
+            AvailableEngines =
+                new ObservableCollection<string>(PythonEngineManager.Instance.AvailableEngines.Select(x => x.Name));
+            // Add the serialized Python Engine even if it is missing (so that the user does not see an empty slot)
+            if (!AvailableEngines.Contains(NodeModel.EngineName))
+            {
+                AvailableEngines.Add(NodeModel.EngineName);
+            }
+
+            PythonEngineManager.Instance.AvailableEngines.CollectionChanged += UpdateAvailableEngines;
+
+            originalScript = propValue;
+            CachedEngine = NodeModel.EngineName;
+            EngineSelectorComboBox.ItemsSource = AvailableEngines;
+            EngineSelectorComboBox.SelectedItem = CachedEngine;
+
+            if (!useMonacoEditor)
+            {
+                InstallFoldingManager();
+            }
+
+            dynamoViewModel.PreferencesWindowChanged += DynamoViewModel_PreferencesWindowChanged;
+
+            dynamoViewModel.PreferenceSettings.PropertyChanged += PreferenceSettings_PropertyChanged;
+            NodeModel.PropertyChanged += OnNodeModelPropertyChanged;
+
+            UpdatePythonUpgradeBar();
+            UpdateMigrationAssistantButtonEnabled();
+        }
+
+        private void InitializeAvalonEditor(string propValue)
+        {
             // Register auto-completion callbacks
             editText.TextArea.TextEntering += OnTextAreaTextEntering;
             editText.TextArea.TextEntered += OnTextAreaTextEntered;
@@ -162,31 +233,63 @@ namespace PythonNodeModelsWpf
             // Add custom highlighting rules consistent with DesignScript
             CodeHighlightingRuleFactory.AddCommonHighlighingRules(editText, dynamoViewModel.EngineController);
 
-            AvailableEngines =
-                new ObservableCollection<string>(PythonEngineManager.Instance.AvailableEngines.Select(x => x.Name));
-            // Add the serialized Python Engine even if it is missing (so that the user does not see an empty slot)
-            if (!AvailableEngines.Contains(NodeModel.EngineName))
-            {
-                AvailableEngines.Add(NodeModel.EngineName);
-            }
-
-            PythonEngineManager.Instance.AvailableEngines.CollectionChanged += UpdateAvailableEngines;
-
             editText.Text = propValue;
-            originalScript = propValue;
-            CachedEngine = NodeModel.EngineName;
-            EngineSelectorComboBox.ItemsSource = AvailableEngines;
-            EngineSelectorComboBox.SelectedItem = CachedEngine;
 
-            InstallFoldingManager();
+            // Show Avalon editor, hide Monaco
+            AvalonEditorBorder.Visibility = Visibility.Visible;
+            MonacoEditorBorder.Visibility = Visibility.Collapsed;
+        }
 
-            dynamoViewModel.PreferencesWindowChanged += DynamoViewModel_PreferencesWindowChanged;
+        private void InitializeMonacoEditor(string propValue)
+        {
+            // Hide Avalon editor, show Monaco
+            AvalonEditorBorder.Visibility = Visibility.Collapsed;
+            MonacoEditorBorder.Visibility = Visibility.Visible;
 
-            dynamoViewModel.PreferenceSettings.PropertyChanged += PreferenceSettings_PropertyChanged;
-            NodeModel.PropertyChanged += OnNodeModelPropertyChanged;
+            // Initialize Monaco editor
+            MonacoEditor = new MonacoCodeEditor();
+            MonacoEditor.Language = MonacoLanguage.Python;
+            MonacoEditor.HorizontalAlignment = HorizontalAlignment.Stretch;
+            MonacoEditor.VerticalAlignment = VerticalAlignment.Stretch;
+            MonacoEditorBorder.Child = MonacoEditor;
 
-            UpdatePythonUpgradeBar();
-            UpdateMigrationAssistantButtonEnabled();
+            // Wire up Monaco editor events
+            MonacoEditor.ContentChanged += OnMonacoContentChanged;
+            MonacoEditor.EditorReady += OnMonacoEditorReady;
+
+            // Set initial content
+            _ = MonacoEditor.SetContentAsync(propValue);
+
+            // Apply preferences
+            _ = ApplyMonacoPreferencesAsync();
+        }
+
+        private async Task ApplyMonacoPreferencesAsync()
+        {
+            if (MonacoEditor == null || !MonacoEditor.IsEditorReady)
+                return;
+
+            try
+            {
+                var fontSize = dynamoViewModel.PreferenceSettings.PythonScriptZoomScale * fontSizePreferencesSliderProportionValue;
+                await MonacoEditor.SetFontSizeAsync((int)fontSize);
+                await MonacoEditor.SetLineNumbersAsync(true);
+            }
+            catch (Exception)
+            {
+                // Silently handle errors during preference application
+            }
+        }
+
+        private void OnMonacoEditorReady(object sender, EventArgs e)
+        {
+            _ = ApplyMonacoPreferencesAsync();
+        }
+
+        private void OnMonacoContentChanged(object sender, MonacoContentChangedEventArgs e)
+        {
+            nodeWasModified = e.Content != originalScript;
+            IsSaved = !nodeWasModified;
         }
 
         private void UpdatePythonUpgradeBar()
@@ -359,28 +462,56 @@ namespace PythonNodeModelsWpf
         }
 
         /// <summary>
-        /// Function to increases/decreases font size in Avalon editor by a specific increment
+        /// Function to increases/decreases font size in editor by a specific increment
         /// </summary>
         /// <param name="increase"></param>
-        private void UpdateFontSize(bool increase, double delta = 1.0)
+        private async void UpdateFontSize(bool increase, double delta = 1.0)
         {
             if (delta == 0) return;
-            double currentSize = editText.FontSize;
-
-            if (increase)
+            
+            if (useMonacoEditor && MonacoEditor != null)
             {
-                if (currentSize < FONT_MAX_SIZE)
+                var currentSize = dynamoViewModel.PreferenceSettings.PythonScriptZoomScale * fontSizePreferencesSliderProportionValue;
+                if (increase)
                 {
-                    double newSize = Math.Min(FONT_MAX_SIZE, currentSize + delta);
-                    editText.FontSize = newSize;
+                    if (currentSize < FONT_MAX_SIZE)
+                    {
+                        double newSize = Math.Min(FONT_MAX_SIZE, currentSize + delta);
+                        await MonacoEditor.SetFontSizeAsync((int)newSize);
+                        zoomScaleCacheValue = (int)(newSize / fontSizePreferencesSliderProportionValue);
+                        dynamoViewModel.PreferenceSettings.PythonScriptZoomScale = zoomScaleCacheValue;
+                    }
+                }
+                else
+                {
+                    if (currentSize > FONT_MIN_SIZE)
+                    {
+                        double newSize = Math.Max(FONT_MIN_SIZE, currentSize - delta);
+                        await MonacoEditor.SetFontSizeAsync((int)newSize);
+                        zoomScaleCacheValue = (int)(newSize / fontSizePreferencesSliderProportionValue);
+                        dynamoViewModel.PreferenceSettings.PythonScriptZoomScale = zoomScaleCacheValue;
+                    }
                 }
             }
             else
             {
-                if (currentSize > FONT_MIN_SIZE)
+                double currentSize = editText.FontSize;
+
+                if (increase)
                 {
-                    double newSize = Math.Max(FONT_MIN_SIZE, currentSize - delta);
-                    editText.FontSize = newSize;
+                    if (currentSize < FONT_MAX_SIZE)
+                    {
+                        double newSize = Math.Min(FONT_MAX_SIZE, currentSize + delta);
+                        editText.FontSize = newSize;
+                    }
+                }
+                else
+                {
+                    if (currentSize > FONT_MIN_SIZE)
+                    {
+                        double newSize = Math.Max(FONT_MIN_SIZE, currentSize - delta);
+                        editText.FontSize = newSize;
+                    }
                 }
             }
         }
@@ -469,10 +600,10 @@ namespace PythonNodeModelsWpf
             }
         }
 
-        private void OnNodeModelCodeMigrated(object sender, PythonCodeMigrationEventArgs e)
+        private async void OnNodeModelCodeMigrated(object sender, PythonCodeMigrationEventArgs e)
         {
             originalScript = e.OldCode;
-            editText.Text = e.NewCode;
+            await SetEditorTextAsync(e.NewCode);
             if (CachedEngine != PythonEngineManager.PythonNet3EngineName)
             {
                 CachedEngine = PythonEngineManager.PythonNet3EngineName;
@@ -480,16 +611,17 @@ namespace PythonNodeModelsWpf
             }
         }
 
-        private void OnSaveClicked(object sender, RoutedEventArgs e)
+        private async void OnSaveClicked(object sender, RoutedEventArgs e)
         {
-            SaveScript();
+            await SaveScriptAsync();
         }
 
-        private void SaveScript()
+        private async Task SaveScriptAsync()
         {
-            originalScript = editText.Text;
+            var scriptText = await GetEditorTextAsync();
+            originalScript = scriptText;
             NodeModel.EngineName = CachedEngine;
-            UpdateScript(editText.Text);
+            UpdateScript(scriptText);
             Analytics.TrackEvent(
                 Dynamo.Logging.Actions.Save,
                 Dynamo.Logging.Categories.PythonOperations);
@@ -497,11 +629,11 @@ namespace PythonNodeModelsWpf
             DismissPythonUpgradeBar();
         }
 
-        private void OnRevertClicked(object sender, RoutedEventArgs e)
+        private async void OnRevertClicked(object sender, RoutedEventArgs e)
         {
             if (nodeWasModified)
             {
-                editText.Text = originalScript;
+                await SetEditorTextAsync(originalScript);
                 CachedEngine = NodeModel.EngineName;
                 EngineSelectorComboBox.SelectedItem = CachedEngine;
                 UpdateScript(originalScript);
@@ -593,6 +725,13 @@ namespace PythonNodeModelsWpf
             if (!dynamoViewModel.DockedNodeWindows.Contains(Uid))
             {
                 completionProvider?.Dispose();
+                if (MonacoEditor != null)
+                {
+                    MonacoEditor.ContentChanged -= OnMonacoContentChanged;
+                    MonacoEditor.EditorReady -= OnMonacoEditorReady;
+                    MonacoEditor.Dispose();
+                    MonacoEditor = null;
+                }
                 NodeModel.CodeMigrated -= OnNodeModelCodeMigrated;
                 NodeModel.UserScriptWarned -= WarnUserScript;
                 NodeModel.PropertyChanged -= OnNodeModelPropertyChanged;
@@ -610,19 +749,31 @@ namespace PythonNodeModelsWpf
             }
         }
 
-        private void OnUndoClicked(object sender, RoutedEventArgs e)
+        private async void OnUndoClicked(object sender, RoutedEventArgs e)
         {
-            if (!editText.CanUndo) return;
-
-            editText.Undo();
+            if (useMonacoEditor && MonacoEditor != null)
+            {
+                await MonacoEditor.UndoAsync();
+            }
+            else
+            {
+                if (!editText.CanUndo) return;
+                editText.Undo();
+            }
             e.Handled = true;
         }
 
-        private void OnRedoClicked(object sender, RoutedEventArgs e)
+        private async void OnRedoClicked(object sender, RoutedEventArgs e)
         {
-            if (!editText.CanRedo) return;
-
-            editText.Redo();
+            if (useMonacoEditor && MonacoEditor != null)
+            {
+                await MonacoEditor.RedoAsync();
+            }
+            else
+            {
+                if (!editText.CanRedo) return;
+                editText.Redo();
+            }
             e.Handled = true;
         }
 

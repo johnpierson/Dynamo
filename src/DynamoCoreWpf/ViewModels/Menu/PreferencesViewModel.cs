@@ -967,6 +967,22 @@ namespace Dynamo.ViewModels
         }
 
         /// <summary>
+        /// Indicates if Monaco Editor should be used instead of AvalonEdit for code editing.
+        /// </summary>
+        public bool UseMonacoEditor
+        {
+            get
+            {
+                return preferenceSettings.UseMonacoEditor;
+            }
+            set
+            {
+                preferenceSettings.UseMonacoEditor = value;
+                RaisePropertyChanged(nameof(UseMonacoEditor));
+            }
+        }
+
+        /// <summary>
         /// This property will make Visible or Collapse the AddStyle Border defined in the GroupStyles section
         /// </summary>
         public bool IsVisibleAddStyleBorder 
@@ -1923,6 +1939,9 @@ namespace Dynamo.ViewModels
                     goto default;
                 case nameof(ShowCodeBlockLineNumber):
                     description = Res.ResourceManager.GetString(nameof(Res.PreferencesViewShowCodeBlockNodeLineNumber), System.Globalization.CultureInfo.InvariantCulture);
+                    goto default;
+                case nameof(UseMonacoEditor):
+                    description = "Use Monaco Editor (Experimental)";
                     goto default;
                 case nameof(DisableTrustWarnings):
                     description = Res.ResourceManager.GetString(nameof(Res.PreferencesViewTrustWarningHeader), System.Globalization.CultureInfo.InvariantCulture);
