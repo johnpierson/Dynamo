@@ -329,8 +329,14 @@ namespace PythonNodeModelsWpf
             {
                 var dynamoView = Owner as DynamoView;
                 var titleBar = FindName("TitleBar") as DockPanel;
-                var editor = FindName("editText") as TextEditor;
-                editor.IsModified = !IsSaved;
+                if (!useMonacoEditor)
+                {
+                    var editor = FindName("editText") as TextEditor;
+                    if (editor != null)
+                    {
+                        editor.IsModified = !IsSaved;
+                    }
+                }
 
                 dynamoView.DockWindowInSideBar(this, NodeModel, titleBar);
 
@@ -376,8 +382,9 @@ namespace PythonNodeModelsWpf
         {
             //if (!ShouldUpdate()) return;
 
-            if (foldingManager == null)
-                throw new ArgumentNullException("foldingManager");
+            // Only update foldings when using AvalonEdit
+            if (useMonacoEditor || foldingManager == null)
+                return;
 
             // Since we cannot 'set' these values any other way, we need to change them on each update
             var margins = editText.TextArea.LeftMargins.OfType<FoldingMargin>();
@@ -447,7 +454,7 @@ namespace PythonNodeModelsWpf
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void EditorBox_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        private async void EditorBox_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
         {
             bool ctrl = Keyboard.Modifiers == System.Windows.Input.ModifierKeys.Control;
             if (ctrl)
@@ -456,9 +463,12 @@ namespace PythonNodeModelsWpf
                 e.Handled = true;
             }
 
-            int percentage = Convert.ToInt32( editText.FontSize / fontSizePreferencesSliderProportionValue );
-            zoomScaleCacheValue = percentage;
-            dynamoViewModel.PreferenceSettings.PythonScriptZoomScale = percentage;
+            if (!useMonacoEditor)
+            {
+                int percentage = Convert.ToInt32(editText.FontSize / fontSizePreferencesSliderProportionValue);
+                zoomScaleCacheValue = percentage;
+                dynamoViewModel.PreferenceSettings.PythonScriptZoomScale = percentage;
+            }
         }
 
         /// <summary>
@@ -652,10 +662,11 @@ namespace PythonNodeModelsWpf
             NodeModel.OnNodeModified();
         }
 
-        private void OnRunClicked(object sender, RoutedEventArgs e)
+        private async void OnRunClicked(object sender, RoutedEventArgs e)
         {
             NodeModel.EngineName = CachedEngine;
-            UpdateScript(editText.Text);
+            var scriptText = await GetEditorTextAsync();
+            UpdateScript(scriptText);
             if (dynamoViewModel.HomeSpace.RunSettings.RunType != RunType.Automatic)
             {
                 dynamoViewModel.HomeSpace.Run();
@@ -667,23 +678,33 @@ namespace PythonNodeModelsWpf
                 Dynamo.Logging.Categories.PythonOperations);
         }
 
-        private void OnMigrationAssistantClicked(object sender, RoutedEventArgs e)
+        private async void OnMigrationAssistantClicked(object sender, RoutedEventArgs e)
         {
             if (NodeModel == null)
                 throw new NullReferenceException(nameof(NodeModel));
 
-            UpdateScript(editText.Text);
+            var scriptText = await GetEditorTextAsync();
+            UpdateScript(scriptText);
             Analytics.TrackEvent(
                 Dynamo.Logging.Actions.Migration,
                 Dynamo.Logging.Categories.PythonOperations);
             NodeModel.RequestCodeMigration(e);
         }
-        private void OnConvertTabsToSpacesClicked(object sender, RoutedEventArgs e)
+        private async void OnConvertTabsToSpacesClicked(object sender, RoutedEventArgs e)
         {
             if (NodeModel == null)
                 throw new NullReferenceException(nameof(NodeModel));
 
-            if (editText.Document != null && !String.IsNullOrEmpty(editText.Document.Text))
+            if (useMonacoEditor && MonacoEditor != null)
+            {
+                var content = await MonacoEditor.GetContentAsync();
+                if (!String.IsNullOrEmpty(content))
+                {
+                    var convertedText = PythonIndentationStrategy.ConvertTabsToSpaces(content);
+                    await MonacoEditor.SetContentAsync(convertedText);
+                }
+            }
+            else if (editText.Document != null && !String.IsNullOrEmpty(editText.Document.Text))
             {
                 var convertedText = PythonIndentationStrategy.ConvertTabsToSpaces(editText.Document.Text);
                 editText.Document.Text = convertedText;
@@ -743,9 +764,15 @@ namespace PythonNodeModelsWpf
                     Dynamo.Logging.Actions.Close,
                     Dynamo.Logging.Categories.PythonOperations);
 
-                editText.TextChanged -= EditTextOnTextChanged;
-                FoldingManager.Uninstall(foldingManager);
-                foldingManager = null;
+                if (!useMonacoEditor)
+                {
+                    editText.TextChanged -= EditTextOnTextChanged;
+                    if (foldingManager != null)
+                    {
+                        FoldingManager.Uninstall(foldingManager);
+                        foldingManager = null;
+                    }
+                }
             }
         }
 
