@@ -139,7 +139,13 @@
                 language: currentLanguage,
                 theme: 'vs-dark',
                 automaticLayout: true,
-                minimap: { enabled: false },
+                minimap: { 
+                    enabled: true,
+                    side: 'right',
+                    showSlider: 'always',
+                    renderCharacters: true,
+                    maxColumn: 250
+                },
                 scrollBeyondLastLine: false,
                 fontSize: 13,
                 fontFamily: "'Source Code Pro', 'Consolas', 'Courier New', monospace",
@@ -182,9 +188,22 @@
                     comments: false,
                     strings: false
                 },
-                parameterHints: { enabled: true },
+                quickSuggestionsDelay: 10,
+                suggestOnTriggerCharacters: true,
+                acceptSuggestionOnCommitCharacter: true,
+                acceptSuggestionOnEnter: 'on',
+                tabCompletion: 'off',
+                wordBasedSuggestions: 'matchingDocuments',
+                parameterHints: { 
+                    enabled: true,
+                    cycle: false
+                },
                 formatOnPaste: true,
-                formatOnType: true
+                formatOnType: true,
+                hover: {
+                    enabled: true,
+                    delay: 300
+                }
             });
             
             // Listen for content changes
@@ -224,6 +243,225 @@
                     });
                 }
             });
+            
+            // Register IntelliSense providers for Python
+            if (currentLanguage === 'python') {
+                // Store pending requests
+                const pendingCompletions = {};
+                const pendingHovers = {};
+                const pendingSignatures = {};
+                
+                // Global handlers for responses
+                window.handleCompletionResponse = function(rid, completions) {
+                    if (pendingCompletions[rid]) {
+                        const { resolve, range } = pendingCompletions[rid];
+                        delete pendingCompletions[rid];
+                        
+                        const suggestions = (completions || []).map(function(c) {
+                            return {
+                                label: c.label || c.text,
+                                kind: monaco.languages.CompletionItemKind[c.kind] || monaco.languages.CompletionItemKind.Text,
+                                insertText: c.insertText || c.text || c.label,
+                                detail: c.detail || '',
+                                documentation: {
+                                    value: c.documentation || c.description || '',
+                                    isTrusted: true
+                                },
+                                range: range,
+                                sortText: c.sortText || c.label || c.text
+                            };
+                        });
+                        
+                        resolve({ suggestions: suggestions });
+                    }
+                };
+                
+                window.handleHoverResponse = function(rid, hoverInfo) {
+                    if (pendingHovers[rid]) {
+                        const { resolve } = pendingHovers[rid];
+                        delete pendingHovers[rid];
+                        resolve(hoverInfo);
+                    }
+                };
+                
+                window.handleSignatureResponse = function(rid, signatureInfo) {
+                    if (pendingSignatures[rid]) {
+                        const { resolve } = pendingSignatures[rid];
+                        delete pendingSignatures[rid];
+                        resolve(signatureInfo);
+                    }
+                };
+                
+                // 1. Completion Provider - Enhanced with more trigger characters
+                monaco.languages.registerCompletionItemProvider('python', {
+                    triggerCharacters: ['.'],
+                    provideCompletionItems: function(model, position, context) {
+                        return new Promise(function(resolve, reject) {
+                            // When '.' is typed, Monaco triggers completion
+                            // The position is AFTER the '.', so we need to get code including the '.'
+                            const word = model.getWordUntilPosition(position);
+                            const range = {
+                                startLineNumber: position.lineNumber,
+                                endLineNumber: position.lineNumber,
+                                startColumn: word.startColumn,
+                                endColumn: word.endColumn
+                            };
+                            
+                            // Get code up to and including the cursor position
+                            // Monaco's getValueInRange endColumn is exclusive, so position.column gives us up to (but not including) that column
+                            // Since cursor is AFTER the '.', position.column includes the '.' in the range
+                            let code = model.getValueInRange({
+                                startLineNumber: 1,
+                                startColumn: 1,
+                                endLineNumber: position.lineNumber,
+                                endColumn: position.column
+                            });
+                            
+                            // Debug logging
+                            console.log('Monaco completion triggered:', {
+                                line: position.lineNumber,
+                                column: position.column,
+                                triggerCharacter: context.triggerCharacter,
+                                codeLength: code.length,
+                                codeEnd: code.substring(Math.max(0, code.length - 50))
+                            });
+                            
+                            // Request completions from C#
+                            const requestId = 'completion_' + Date.now() + '_' + Math.random();
+                            pendingCompletions[requestId] = { resolve: resolve, range: range };
+                            
+                            // Set a timeout
+                            setTimeout(function() {
+                                if (pendingCompletions[requestId]) {
+                                    console.log('Completion request timed out:', requestId);
+                                    delete pendingCompletions[requestId];
+                                    resolve({ suggestions: [] });
+                                }
+                            }, 5000);
+                            
+                            // Send completion request
+                            if (window.chrome && window.chrome.webview) {
+                                window.chrome.webview.postMessage({
+                                    type: 'requestCompletions',
+                                    requestId: requestId,
+                                    code: code,
+                                    line: position.lineNumber,
+                                    column: position.column
+                                });
+                            } else {
+                                console.log('WebView not available');
+                                delete pendingCompletions[requestId];
+                                resolve({ suggestions: [] });
+                            }
+                        });
+                    }
+                });
+                
+                // 2. Hover Provider - Show documentation on hover
+                monaco.languages.registerHoverProvider('python', {
+                    provideHover: function(model, position) {
+                        return new Promise(function(resolve) {
+                            const word = model.getWordAtPosition(position);
+                            if (!word) {
+                                resolve(null);
+                                return;
+                            }
+                            
+                            // Get code up to cursor
+                            const code = model.getValueInRange({
+                                startLineNumber: 1,
+                                startColumn: 1,
+                                endLineNumber: position.lineNumber,
+                                endColumn: position.column
+                            });
+                            
+                            const requestId = 'hover_' + Date.now() + '_' + Math.random();
+                            pendingHovers[requestId] = { resolve: resolve };
+                            
+                            setTimeout(function() {
+                                if (pendingHovers[requestId]) {
+                                    delete pendingHovers[requestId];
+                                    resolve(null);
+                                }
+                            }, 3000);
+                            
+                            if (window.chrome && window.chrome.webview) {
+                                window.chrome.webview.postMessage({
+                                    type: 'requestHover',
+                                    requestId: requestId,
+                                    code: code,
+                                    word: word.word,
+                                    line: position.lineNumber,
+                                    column: position.column
+                                });
+                            } else {
+                                delete pendingHovers[requestId];
+                                resolve(null);
+                            }
+                        });
+                    }
+                });
+                
+                // 3. Signature Help Provider - Show function signatures
+                monaco.languages.registerSignatureHelpProvider('python', {
+                    signatureHelpTriggerCharacters: ['(', ','],
+                    signatureHelpRetriggerCharacters: [','],
+                    provideSignatureHelp: function(model, position) {
+                        return new Promise(function(resolve) {
+                            // Get code up to cursor
+                            const code = model.getValueInRange({
+                                startLineNumber: 1,
+                                startColumn: 1,
+                                endLineNumber: position.lineNumber,
+                                endColumn: position.column
+                            });
+                            
+                            // Check if we're in a function call (have '(' before cursor)
+                            const lineText = model.getLineContent(position.lineNumber);
+                            const textBeforeCursor = lineText.substring(0, position.column - 1);
+                            const lastOpenParen = textBeforeCursor.lastIndexOf('(');
+                            
+                            if (lastOpenParen === -1) {
+                                resolve(null);
+                                return;
+                            }
+                            
+                            // Extract function name
+                            const beforeParen = textBeforeCursor.substring(0, lastOpenParen).trim();
+                            const match = beforeParen.match(/(\w+(?:\.\w+)*)$/);
+                            if (!match) {
+                                resolve(null);
+                                return;
+                            }
+                            
+                            const functionName = match[1];
+                            const requestId = 'signature_' + Date.now() + '_' + Math.random();
+                            pendingSignatures[requestId] = { resolve: resolve };
+                            
+                            setTimeout(function() {
+                                if (pendingSignatures[requestId]) {
+                                    delete pendingSignatures[requestId];
+                                    resolve(null);
+                                }
+                            }, 3000);
+                            
+                            if (window.chrome && window.chrome.webview) {
+                                window.chrome.webview.postMessage({
+                                    type: 'requestSignature',
+                                    requestId: requestId,
+                                    code: code,
+                                    functionName: functionName,
+                                    line: position.lineNumber,
+                                    column: position.column
+                                });
+                            } else {
+                                delete pendingSignatures[requestId];
+                                resolve(null);
+                            }
+                        });
+                    }
+                });
+            }
             
             isInitialized = true;
             

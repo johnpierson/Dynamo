@@ -256,6 +256,9 @@ namespace PythonNodeModelsWpf
             // Wire up Monaco editor events
             MonacoEditor.ContentChanged += OnMonacoContentChanged;
             MonacoEditor.EditorReady += OnMonacoEditorReady;
+            MonacoEditor.CompletionRequested += OnMonacoCompletionRequested;
+            MonacoEditor.HoverRequested += OnMonacoHoverRequested;
+            MonacoEditor.SignatureRequested += OnMonacoSignatureRequested;
 
             // Set initial content
             _ = MonacoEditor.SetContentAsync(propValue);
@@ -263,6 +266,179 @@ namespace PythonNodeModelsWpf
             // Apply preferences
             _ = ApplyMonacoPreferencesAsync();
         }
+
+        private async void OnMonacoCompletionRequested(object sender, MonacoCompletionRequestEventArgs e)
+        {
+            try
+            {
+                if (completionProvider == null)
+                {
+                    dynamoViewModel.Model.Logger.Log("Monaco completion: completionProvider is null");
+                    await MonacoEditor.SendCompletionsAsync(e.RequestId, new System.Collections.Generic.List<MonacoCompletionItem>());
+                    return;
+                }
+
+                // Log the code being sent for debugging
+                dynamoViewModel.Model.Logger.Log($"Monaco completion request: code length={e.Code?.Length ?? 0}, line={e.Line}, column={e.Column}");
+                if (!string.IsNullOrEmpty(e.Code) && e.Code.Length > 0)
+                {
+                    var lastChars = e.Code.Length > 100 ? e.Code.Substring(e.Code.Length - 100) : e.Code;
+                    dynamoViewModel.Model.Logger.Log($"Last 100 chars: {lastChars}");
+                }
+
+                // Get completions from Python completion provider
+                // The code should include everything up to and including the cursor position (including the '.' character)
+                // This matches AvalonEdit's behavior: editText.Text.Substring(0, editText.CaretOffset)
+                var completions = completionProvider.GetCompletionData(e.Code, false);
+                
+                dynamoViewModel.Model.Logger.Log($"Monaco completion: received {completions?.Length ?? 0} completions");
+                if (completions != null && completions.Length > 0)
+                {
+                    var firstFew = string.Join(", ", completions.Take(5).Select(c => c.Text));
+                    dynamoViewModel.Model.Logger.Log($"First few completions: {firstFew}");
+                }
+                
+                if (completions == null || completions.Length == 0)
+                {
+                    await MonacoEditor.SendCompletionsAsync(e.RequestId, new System.Collections.Generic.List<MonacoCompletionItem>());
+                    return;
+                }
+
+                // Convert Python completion data to Monaco format
+                var monacoCompletions = new System.Collections.Generic.List<MonacoCompletionItem>();
+                foreach (var completion in completions)
+                {
+                    var monacoItem = new MonacoCompletionItem
+                    {
+                        Label = completion.Text,
+                        InsertText = completion.Text,
+                        Detail = completion.Description?.ToString() ?? string.Empty,
+                        Documentation = completion.Description?.ToString() ?? string.Empty,
+                        SortText = completion.Text
+                    };
+
+                    // Map completion type to Monaco kind
+                    // Since IronPythonCompletionData doesn't expose the CompletionType directly,
+                    // we'll use a simple heuristic based on naming conventions
+                    if (completion is IronPythonCompletionData)
+                    {
+                        var text = completion.Text;
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            // Simple heuristics: uppercase start = class, lowercase = method/property
+                            if (char.IsUpper(text[0]) && text.Length > 1 && char.IsLower(text[1]))
+                            {
+                                monacoItem.Kind = "Class";
+                            }
+                            else if (text.StartsWith("__") && text.EndsWith("__"))
+                            {
+                                monacoItem.Kind = "Method"; // Magic methods
+                            }
+                            else
+                            {
+                                monacoItem.Kind = "Method"; // Default to method for Python
+                            }
+                        }
+                        else
+                        {
+                            monacoItem.Kind = "Text";
+                        }
+                    }
+                    else
+                    {
+                        monacoItem.Kind = "Text";
+                    }
+
+                    monacoCompletions.Add(monacoItem);
+                }
+
+                await MonacoEditor.SendCompletionsAsync(e.RequestId, monacoCompletions);
+            }
+            catch (Exception ex)
+            {
+                dynamoViewModel.Model.Logger.Log($"Failed to get Python completions: {ex.Message}");
+                await MonacoEditor.SendCompletionsAsync(e.RequestId, new System.Collections.Generic.List<MonacoCompletionItem>());
+            }
+        }
+
+        private async void OnMonacoHoverRequested(object sender, MonacoHoverRequestEventArgs e)
+        {
+            try
+            {
+                if (completionProvider == null)
+                {
+                    await MonacoEditor.SendHoverAsync(e.RequestId, string.Empty);
+                    return;
+                }
+
+                // Get completions to find the description for the hovered word
+                var completions = completionProvider.GetCompletionData(e.Code, false);
+                var matchingCompletion = completions?.FirstOrDefault(c => c.Text == e.Word);
+                
+                if (matchingCompletion != null)
+                {
+                    var description = matchingCompletion.Description?.ToString() ?? string.Empty;
+                    await MonacoEditor.SendHoverAsync(e.RequestId, description);
+                }
+                else
+                {
+                    await MonacoEditor.SendHoverAsync(e.RequestId, string.Empty);
+                }
+            }
+            catch (Exception ex)
+            {
+                dynamoViewModel.Model.Logger.Log($"Failed to get Python hover info: {ex.Message}");
+                await MonacoEditor.SendHoverAsync(e.RequestId, string.Empty);
+            }
+        }
+
+        private async void OnMonacoSignatureRequested(object sender, MonacoSignatureRequestEventArgs e)
+        {
+            try
+            {
+                if (completionProvider == null)
+                {
+                    await MonacoEditor.SendSignatureHelpAsync(e.RequestId, new System.Collections.Generic.List<string>());
+                    return;
+                }
+
+                // Get completions to find function signatures
+                var completions = completionProvider.GetCompletionData(e.Code, true); // Use expand=true to get more details
+                var matchingCompletions = completions?.Where(c => c.Text == e.FunctionName).ToList();
+                
+                if (matchingCompletions != null && matchingCompletions.Any())
+                {
+                    var signatures = new System.Collections.Generic.List<string>();
+                    foreach (var completion in matchingCompletions)
+                    {
+                        var description = completion.Description?.ToString() ?? string.Empty;
+                        // Extract signature from description if available
+                        if (!string.IsNullOrEmpty(description))
+                        {
+                            // Try to extract function signature from description
+                            // Python completion descriptions often contain signatures
+                            signatures.Add(description);
+                        }
+                        else
+                        {
+                            signatures.Add($"{e.FunctionName}(...)");
+                        }
+                    }
+                    
+                    await MonacoEditor.SendSignatureHelpAsync(e.RequestId, signatures, 0, 0);
+                }
+                else
+                {
+                    await MonacoEditor.SendSignatureHelpAsync(e.RequestId, new System.Collections.Generic.List<string>());
+                }
+            }
+            catch (Exception ex)
+            {
+                dynamoViewModel.Model.Logger.Log($"Failed to get Python signature help: {ex.Message}");
+                await MonacoEditor.SendSignatureHelpAsync(e.RequestId, new System.Collections.Generic.List<string>());
+            }
+        }
+
 
         private async Task ApplyMonacoPreferencesAsync()
         {

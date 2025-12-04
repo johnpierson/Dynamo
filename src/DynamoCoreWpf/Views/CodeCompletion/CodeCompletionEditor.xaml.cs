@@ -62,6 +62,7 @@ namespace Dynamo.UI.Controls
             this.InnerTextEditor.TextArea.TextEntered += OnTextAreaTextEntered;
 
             CodeHighlightingRuleFactory.CreateHighlightingRules(InnerTextEditor, dynamoViewModel.EngineController);
+        }
 
         /// <summary>
         /// Set focus to the editor.

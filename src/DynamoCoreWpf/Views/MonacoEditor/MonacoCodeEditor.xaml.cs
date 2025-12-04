@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -46,6 +48,165 @@ namespace Dynamo.UI.Controls
     }
 
     /// <summary>
+    /// Event args for completion request events from Monaco Editor.
+    /// </summary>
+    public class MonacoCompletionRequestEventArgs : EventArgs
+    {
+        /// <summary>
+        /// The request ID to match with the response.
+        /// </summary>
+        public string RequestId { get; }
+
+        /// <summary>
+        /// The code up to the cursor position.
+        /// </summary>
+        public string Code { get; }
+
+        /// <summary>
+        /// The line number of the cursor.
+        /// </summary>
+        public int Line { get; }
+
+        /// <summary>
+        /// The column number of the cursor.
+        /// </summary>
+        public int Column { get; }
+
+        /// <summary>
+        /// Creates a new instance of MonacoCompletionRequestEventArgs.
+        /// </summary>
+        public MonacoCompletionRequestEventArgs(string requestId, string code, int line, int column)
+        {
+            RequestId = requestId;
+            Code = code;
+            Line = line;
+            Column = column;
+        }
+    }
+
+    /// <summary>
+    /// Represents a completion item for Monaco Editor.
+    /// </summary>
+    public class MonacoCompletionItem
+    {
+        /// <summary>
+        /// The label to display in the completion list.
+        /// </summary>
+        public string Label { get; set; }
+
+        /// <summary>
+        /// The text to insert when this completion is selected.
+        /// </summary>
+        public string InsertText { get; set; }
+
+        /// <summary>
+        /// The kind of completion item (Method, Class, Property, etc.).
+        /// </summary>
+        public string Kind { get; set; }
+
+        /// <summary>
+        /// Additional detail about the completion item.
+        /// </summary>
+        public string Detail { get; set; }
+
+        /// <summary>
+        /// Documentation for the completion item.
+        /// </summary>
+        public string Documentation { get; set; }
+
+        /// <summary>
+        /// The text to use for sorting.
+        /// </summary>
+        public string SortText { get; set; }
+    }
+
+    /// <summary>
+    /// Event args for hover request events from Monaco Editor.
+    /// </summary>
+    public class MonacoHoverRequestEventArgs : EventArgs
+    {
+        /// <summary>
+        /// The request ID to match with the response.
+        /// </summary>
+        public string RequestId { get; }
+
+        /// <summary>
+        /// The code up to the cursor position.
+        /// </summary>
+        public string Code { get; }
+
+        /// <summary>
+        /// The word at the cursor position.
+        /// </summary>
+        public string Word { get; }
+
+        /// <summary>
+        /// The line number of the cursor.
+        /// </summary>
+        public int Line { get; }
+
+        /// <summary>
+        /// The column number of the cursor.
+        /// </summary>
+        public int Column { get; }
+
+        /// <summary>
+        /// Creates a new instance of MonacoHoverRequestEventArgs.
+        /// </summary>
+        public MonacoHoverRequestEventArgs(string requestId, string code, string word, int line, int column)
+        {
+            RequestId = requestId;
+            Code = code;
+            Word = word;
+            Line = line;
+            Column = column;
+        }
+    }
+
+    /// <summary>
+    /// Event args for signature help request events from Monaco Editor.
+    /// </summary>
+    public class MonacoSignatureRequestEventArgs : EventArgs
+    {
+        /// <summary>
+        /// The request ID to match with the response.
+        /// </summary>
+        public string RequestId { get; }
+
+        /// <summary>
+        /// The code up to the cursor position.
+        /// </summary>
+        public string Code { get; }
+
+        /// <summary>
+        /// The function name being called.
+        /// </summary>
+        public string FunctionName { get; }
+
+        /// <summary>
+        /// The line number of the cursor.
+        /// </summary>
+        public int Line { get; }
+
+        /// <summary>
+        /// The column number of the cursor.
+        /// </summary>
+        public int Column { get; }
+
+        /// <summary>
+        /// Creates a new instance of MonacoSignatureRequestEventArgs.
+        /// </summary>
+        public MonacoSignatureRequestEventArgs(string requestId, string code, string functionName, int line, int column)
+        {
+            RequestId = requestId;
+            Code = code;
+            FunctionName = functionName;
+            Line = line;
+            Column = column;
+        }
+    }
+
+    /// <summary>
     /// A code editor control powered by Monaco Editor (VS Code's editor) via WebView2.
     /// This is an experimental feature available only in debug builds.
     /// </summary>
@@ -80,6 +241,21 @@ namespace Dynamo.UI.Controls
         /// Event raised when the editor is fully initialized and ready.
         /// </summary>
         public event EventHandler EditorReady;
+
+        /// <summary>
+        /// Event raised when the editor requests code completions.
+        /// </summary>
+        public event EventHandler<MonacoCompletionRequestEventArgs> CompletionRequested;
+
+        /// <summary>
+        /// Event raised when the editor requests hover information.
+        /// </summary>
+        public event EventHandler<MonacoHoverRequestEventArgs> HoverRequested;
+
+        /// <summary>
+        /// Event raised when the editor requests signature help.
+        /// </summary>
+        public event EventHandler<MonacoSignatureRequestEventArgs> SignatureRequested;
 
         /// <summary>
         /// Gets whether the Monaco Editor is fully initialized.
@@ -259,6 +435,62 @@ namespace Dynamo.UI.Controls
 
                     case "cursorChanged":
                         // Can be used for status bar updates if needed
+                        break;
+
+                    case "requestCompletions":
+                        if (root.TryGetProperty("requestId", out var requestIdElement) &&
+                            root.TryGetProperty("code", out var codeElement) &&
+                            root.TryGetProperty("line", out var lineElement) &&
+                            root.TryGetProperty("column", out var columnElement))
+                        {
+                            var requestId = requestIdElement.GetString();
+                            var code = codeElement.GetString();
+                            var line = lineElement.GetInt32();
+                            var column = columnElement.GetInt32();
+                            
+                            LogMessage($"Completion request: requestId={requestId}, code length={code?.Length ?? 0}, line={line}, column={column}");
+                            if (!string.IsNullOrEmpty(code) && code.Length > 0)
+                            {
+                                var lastChars = code.Length > 50 ? code.Substring(code.Length - 50) : code;
+                                LogMessage($"Last 50 chars of code: {lastChars}");
+                            }
+                            
+                            CompletionRequested?.Invoke(this, new MonacoCompletionRequestEventArgs(requestId, code, line, column));
+                        }
+                        break;
+
+                    case "requestHover":
+                        if (root.TryGetProperty("requestId", out var hoverRequestIdElement) &&
+                            root.TryGetProperty("code", out var hoverCodeElement) &&
+                            root.TryGetProperty("word", out var wordElement) &&
+                            root.TryGetProperty("line", out var hoverLineElement) &&
+                            root.TryGetProperty("column", out var hoverColumnElement))
+                        {
+                            var requestId = hoverRequestIdElement.GetString();
+                            var code = hoverCodeElement.GetString();
+                            var word = wordElement.GetString();
+                            var line = hoverLineElement.GetInt32();
+                            var column = hoverColumnElement.GetInt32();
+                            
+                            HoverRequested?.Invoke(this, new MonacoHoverRequestEventArgs(requestId, code, word, line, column));
+                        }
+                        break;
+
+                    case "requestSignature":
+                        if (root.TryGetProperty("requestId", out var sigRequestIdElement) &&
+                            root.TryGetProperty("code", out var sigCodeElement) &&
+                            root.TryGetProperty("functionName", out var functionNameElement) &&
+                            root.TryGetProperty("line", out var sigLineElement) &&
+                            root.TryGetProperty("column", out var sigColumnElement))
+                        {
+                            var requestId = sigRequestIdElement.GetString();
+                            var code = sigCodeElement.GetString();
+                            var functionName = functionNameElement.GetString();
+                            var line = sigLineElement.GetInt32();
+                            var column = sigColumnElement.GetInt32();
+                            
+                            SignatureRequested?.Invoke(this, new MonacoSignatureRequestEventArgs(requestId, code, functionName, line, column));
+                        }
                         break;
                 }
             }
@@ -470,6 +702,102 @@ namespace Dynamo.UI.Controls
             catch (Exception ex)
             {
                 LogMessage($"Error performing redo: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Sends completion suggestions back to the Monaco Editor.
+        /// </summary>
+        /// <param name="requestId">The request ID to match with the original request.</param>
+        /// <param name="completions">The list of completion items.</param>
+        public async Task SendCompletionsAsync(string requestId, List<MonacoCompletionItem> completions)
+        {
+            if (!isInitialized || webView?.CoreWebView2 == null)
+                return;
+
+            try
+            {
+                var completionsJson = JsonSerializer.Serialize(completions);
+                var requestIdJson = JsonSerializer.Serialize(requestId);
+                var script = $@"
+                    (function() {{
+                        if (window.handleCompletionResponse) {{
+                            window.handleCompletionResponse({requestIdJson}, {completionsJson});
+                        }}
+                    }})();
+                ";
+                await webView.CoreWebView2.ExecuteScriptAsync(script);
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Error sending completions: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Sends hover information back to the Monaco Editor.
+        /// </summary>
+        /// <param name="requestId">The request ID to match with the original request.</param>
+        /// <param name="contents">The hover contents (markdown string or array of markdown strings).</param>
+        public async Task SendHoverAsync(string requestId, string contents)
+        {
+            if (!isInitialized || webView?.CoreWebView2 == null)
+                return;
+
+            try
+            {
+                var contentsJson = JsonSerializer.Serialize(contents);
+                var requestIdJson = JsonSerializer.Serialize(requestId);
+                var hoverInfo = $@"{{ contents: [{{ value: {contentsJson}, kind: 'markdown' }}] }}";
+                var script = $@"
+                    (function() {{
+                        if (window.handleHoverResponse) {{
+                            window.handleHoverResponse({requestIdJson}, {hoverInfo});
+                        }}
+                    }})();
+                ";
+                await webView.CoreWebView2.ExecuteScriptAsync(script);
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Error sending hover: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Sends signature help information back to the Monaco Editor.
+        /// </summary>
+        /// <param name="requestId">The request ID to match with the original request.</param>
+        /// <param name="signatures">The list of function signatures.</param>
+        /// <param name="activeSignature">The index of the active signature.</param>
+        /// <param name="activeParameter">The index of the active parameter.</param>
+        public async Task SendSignatureHelpAsync(string requestId, List<string> signatures, int activeSignature = 0, int activeParameter = 0)
+        {
+            if (!isInitialized || webView?.CoreWebView2 == null)
+                return;
+
+            try
+            {
+                var sigs = signatures.Select(s => new { label = s, documentation = "" }).ToArray();
+                var sigsJson = JsonSerializer.Serialize(sigs);
+                var requestIdJson = JsonSerializer.Serialize(requestId);
+                var signatureInfo = $@"{{
+                    signatures: {sigsJson},
+                    activeSignature: {activeSignature},
+                    activeParameter: {activeParameter}
+                }}";
+                var script = $@"
+                    (function() {{
+                        if (window.handleSignatureResponse) {{
+                            window.handleSignatureResponse({requestIdJson}, {signatureInfo});
+                        }}
+                    }})();
+                ";
+                await webView.CoreWebView2.ExecuteScriptAsync(script);
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Error sending signature help: {ex.Message}");
             }
         }
 
