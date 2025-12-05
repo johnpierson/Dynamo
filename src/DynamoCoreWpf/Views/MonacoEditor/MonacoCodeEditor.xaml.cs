@@ -448,11 +448,20 @@ namespace Dynamo.UI.Controls
                             var line = lineElement.GetInt32();
                             var column = columnElement.GetInt32();
                             
-                            LogMessage($"Completion request: requestId={requestId}, code length={code?.Length ?? 0}, line={line}, column={column}");
+                            LogMessage($"Completion request received: requestId={requestId}, code length={code?.Length ?? 0}, line={line}, column={column}");
                             if (!string.IsNullOrEmpty(code) && code.Length > 0)
                             {
-                                var lastChars = code.Length > 50 ? code.Substring(code.Length - 50) : code;
-                                LogMessage($"Last 50 chars of code: {lastChars}");
+                                var lastChars = code.Length > 100 ? code.Substring(code.Length - 100) : code;
+                                LogMessage($"Last 100 chars of code: {lastChars}");
+                            }
+                            
+                            if (CompletionRequested == null)
+                            {
+                                LogMessage("ERROR: CompletionRequested event handler is null!");
+                            }
+                            else
+                            {
+                                LogMessage($"Invoking CompletionRequested event with {CompletionRequested.GetInvocationList().Length} handler(s)");
                             }
                             
                             CompletionRequested?.Invoke(this, new MonacoCompletionRequestEventArgs(requestId, code, line, column));
@@ -717,12 +726,22 @@ namespace Dynamo.UI.Controls
 
             try
             {
-                var completionsJson = JsonSerializer.Serialize(completions);
+                // Use camelCase for JSON serialization to match JavaScript conventions
+                var options = new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    WriteIndented = false
+                };
+                var completionsJson = JsonSerializer.Serialize(completions, options);
                 var requestIdJson = JsonSerializer.Serialize(requestId);
+                var itemCount = completions?.Count ?? 0;
                 var script = $@"
                     (function() {{
+                        console.log('C# sending completions:', {requestIdJson}, {itemCount}, 'items');
                         if (window.handleCompletionResponse) {{
                             window.handleCompletionResponse({requestIdJson}, {completionsJson});
+                        }} else {{
+                            console.error('handleCompletionResponse function not found!');
                         }}
                     }})();
                 ";

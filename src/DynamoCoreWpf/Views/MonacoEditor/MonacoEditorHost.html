@@ -244,37 +244,88 @@
                 }
             });
             
+            // Store pending requests (global, not language-specific)
+            const pendingCompletions = {};
+            const pendingHovers = {};
+            const pendingSignatures = {};
+            
+            // Global handlers for responses (following Monaco standard pattern)
+            window.handleCompletionResponse = function(rid, completions, incomplete) {
+                console.log('handleCompletionResponse called:', { rid, completionsCount: completions?.length || 0, incomplete });
+                if (pendingCompletions[rid]) {
+                    const { resolve, range } = pendingCompletions[rid];
+                    delete pendingCompletions[rid];
+                    
+                    // Convert to Monaco completion items (standard format)
+                    const suggestions = (completions || []).map(function(c) {
+                        // Handle both camelCase (from JSON) and PascalCase property names
+                        const label = c.label || c.Label || c.text || c.Text || '';
+                        const kindStr = c.kind || c.Kind || 'Text';
+                        const insertText = c.insertText || c.InsertText || c.text || c.Text || label;
+                        const detail = c.detail || c.Detail || '';
+                        const documentation = c.documentation || c.Documentation || c.description || c.Description || '';
+                        const sortText = c.sortText || c.SortText || label;
+                        const filterText = c.filterText || c.FilterText || label;
+                        
+                        // Map string kind to Monaco CompletionItemKind
+                        let kind = monaco.languages.CompletionItemKind.Text;
+                        if (typeof kindStr === 'string') {
+                            // Try to find the matching enum value
+                            const kindUpper = kindStr.toUpperCase();
+                            if (monaco.languages.CompletionItemKind[kindStr]) {
+                                kind = monaco.languages.CompletionItemKind[kindStr];
+                            } else if (monaco.languages.CompletionItemKind[kindUpper]) {
+                                kind = monaco.languages.CompletionItemKind[kindUpper];
+                            } else {
+                                // Try common mappings
+                                const kindMap = {
+                                    'CLASS': monaco.languages.CompletionItemKind.Class,
+                                    'METHOD': monaco.languages.CompletionItemKind.Method,
+                                    'FUNCTION': monaco.languages.CompletionItemKind.Function,
+                                    'PROPERTY': monaco.languages.CompletionItemKind.Property,
+                                    'FIELD': monaco.languages.CompletionItemKind.Field,
+                                    'VARIABLE': monaco.languages.CompletionItemKind.Variable,
+                                    'MODULE': monaco.languages.CompletionItemKind.Module,
+                                    'ENUM': monaco.languages.CompletionItemKind.Enum
+                                };
+                                kind = kindMap[kindUpper] || monaco.languages.CompletionItemKind.Text;
+                            }
+                        }
+                        
+                        return {
+                            label: label,
+                            kind: kind,
+                            insertText: insertText,
+                            detail: detail,
+                            documentation: {
+                                value: documentation,
+                                isTrusted: true
+                            },
+                            range: range,
+                            sortText: sortText,
+                            filterText: filterText,
+                            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+                        };
+                    });
+                    
+                    console.log('Resolving with suggestions:', suggestions.length);
+                    // Return in standard Monaco format with optional incomplete flag
+                    // incomplete: true indicates more results might be available
+                    resolve({ 
+                        suggestions: suggestions,
+                        incomplete: incomplete === true
+                    });
+                } else {
+                    console.log('No pending completion found for requestId:', rid);
+                }
+            };
+            
             // Register IntelliSense providers for Python
-            if (currentLanguage === 'python') {
-                // Store pending requests
-                const pendingCompletions = {};
-                const pendingHovers = {};
-                const pendingSignatures = {};
-                
-                // Global handlers for responses
-                window.handleCompletionResponse = function(rid, completions) {
-                    if (pendingCompletions[rid]) {
-                        const { resolve, range } = pendingCompletions[rid];
-                        delete pendingCompletions[rid];
-                        
-                        const suggestions = (completions || []).map(function(c) {
-                            return {
-                                label: c.label || c.text,
-                                kind: monaco.languages.CompletionItemKind[c.kind] || monaco.languages.CompletionItemKind.Text,
-                                insertText: c.insertText || c.text || c.label,
-                                detail: c.detail || '',
-                                documentation: {
-                                    value: c.documentation || c.description || '',
-                                    isTrusted: true
-                                },
-                                range: range,
-                                sortText: c.sortText || c.label || c.text
-                            };
-                        });
-                        
-                        resolve({ suggestions: suggestions });
-                    }
-                };
+            // Always register for Python language (Monaco's built-in Python support)
+            console.log('Registering IntelliSense providers for Python, currentLanguage:', currentLanguage);
+            
+            // Register providers for Python language
+            (function() {
                 
                 window.handleHoverResponse = function(rid, hoverInfo) {
                     if (pendingHovers[rid]) {
@@ -292,68 +343,143 @@
                     }
                 };
                 
-                // 1. Completion Provider - Enhanced with more trigger characters
+                // 1. Completion Provider - Following Monaco Editor standard pattern
+                // Register with high priority to override built-in Python support
                 monaco.languages.registerCompletionItemProvider('python', {
-                    triggerCharacters: ['.'],
+                    // Standard trigger characters for Python IntelliSense
+                    triggerCharacters: ['.', '(', '[', ' '],
                     provideCompletionItems: function(model, position, context) {
+                        console.log('Monaco completion provider called:', {
+                            language: model.getLanguageId(),
+                            line: position.lineNumber,
+                            column: position.column,
+                            triggerKind: context.triggerKind,
+                            triggerCharacter: context.triggerCharacter
+                        });
+                        
                         return new Promise(function(resolve, reject) {
-                            // When '.' is typed, Monaco triggers completion
-                            // The position is AFTER the '.', so we need to get code including the '.'
+                            // Handle different trigger kinds (standard Monaco pattern)
+                            // context.triggerKind can be:
+                            // - monaco.languages.CompletionTriggerKind.Invoke (Ctrl+Space)
+                            // - monaco.languages.CompletionTriggerKind.TriggerCharacter (typed trigger char)
+                            // - monaco.languages.CompletionTriggerKind.TriggerForIncompleteCompletions (retrigger)
+                            
+                            // Calculate replacement range (standard Monaco pattern)
+                            // This determines what text will be replaced when a suggestion is accepted
                             const word = model.getWordUntilPosition(position);
-                            const range = {
+                            let range = {
                                 startLineNumber: position.lineNumber,
                                 endLineNumber: position.lineNumber,
                                 startColumn: word.startColumn,
                                 endColumn: word.endColumn
                             };
                             
+                            // If triggered by a character, include it in the range
+                            if (context.triggerKind === monaco.languages.CompletionTriggerKind.TriggerCharacter && context.triggerCharacter) {
+                                // For trigger characters like '.', we want to replace from before the trigger
+                                const lineContent = model.getLineContent(position.lineNumber);
+                                const charBefore = lineContent.charAt(position.column - 2);
+                                if (charBefore === context.triggerCharacter) {
+                                    range.startColumn = Math.max(1, position.column - 1);
+                                }
+                            }
+                            
                             // Get code up to and including the cursor position
-                            // Monaco's getValueInRange endColumn is exclusive, so position.column gives us up to (but not including) that column
-                            // Since cursor is AFTER the '.', position.column includes the '.' in the range
-                            let code = model.getValueInRange({
-                                startLineNumber: 1,
-                                startColumn: 1,
-                                endLineNumber: position.lineNumber,
-                                endColumn: position.column
-                            });
+                            // Match AvalonEdit behavior: editText.Text.Substring(0, editText.CaretOffset)
+                            // Monaco's getValueInRange endColumn is EXCLUSIVE, so we need position.column + 1
+                            // to include the character at the cursor position
+                            // However, when triggered by '.', the cursor is AFTER the '.', so position.column
+                            // already points past it, and getValueInRange with endColumn: position.column
+                            // will include everything up to (but not including) position.column
+                            // So we need to check: if we want to include the trigger character, we might need position.column
+                            // But actually, if cursor is at column 13 after typing '.' at column 12,
+                            // then getValueInRange(..., endColumn: 13) gets columns 1-12, which includes the '.'
+                            
+                            // To match AvalonEdit exactly: get all text from start to cursor position
+                            // The cursor position in Monaco is 1-based, and endColumn is exclusive
+                            // So to get text including the character BEFORE the cursor, we use position.column
+                            // But to include the character AT the cursor (if any), we might need position.column + 1
+                            
+                            // Actually, let's be explicit: get everything from line 1, column 1, 
+                            // up to and including the current line, up to the cursor column
+                            let code = '';
+                            for (let i = 1; i < position.lineNumber; i++) {
+                                code += model.getLineContent(i) + '\n';
+                            }
+                            // For the current line, get up to the cursor position
+                            const currentLine = model.getLineContent(position.lineNumber);
+                            // position.column is 1-based, so substring(0, position.column - 1) gets chars 0 to position.column-2
+                            // We want chars 0 to position.column-1 (inclusive), so use position.column
+                            code += currentLine.substring(0, position.column - 1);
                             
                             // Debug logging
                             console.log('Monaco completion triggered:', {
                                 line: position.lineNumber,
                                 column: position.column,
+                                triggerKind: context.triggerKind,
                                 triggerCharacter: context.triggerCharacter,
                                 codeLength: code.length,
-                                codeEnd: code.substring(Math.max(0, code.length - 50))
+                                codeEnd: code.substring(Math.max(0, code.length - 50)),
+                                codePreview: code.substring(Math.max(0, code.length - 100))
                             });
                             
                             // Request completions from C#
                             const requestId = 'completion_' + Date.now() + '_' + Math.random();
                             pendingCompletions[requestId] = { resolve: resolve, range: range };
                             
-                            // Set a timeout
+                            // Set a timeout (standard practice for async providers)
                             setTimeout(function() {
                                 if (pendingCompletions[requestId]) {
                                     console.log('Completion request timed out:', requestId);
                                     delete pendingCompletions[requestId];
+                                    // Return empty suggestions on timeout (standard pattern)
                                     resolve({ suggestions: [] });
                                 }
                             }, 5000);
                             
                             // Send completion request
                             if (window.chrome && window.chrome.webview) {
-                                window.chrome.webview.postMessage({
-                                    type: 'requestCompletions',
+                                console.log('Sending completion request to C#:', {
                                     requestId: requestId,
-                                    code: code,
+                                    codeLength: code.length,
+                                    codeEnd: code.substring(Math.max(0, code.length - 30)),
                                     line: position.lineNumber,
                                     column: position.column
                                 });
+                                
+                                try {
+                                    window.chrome.webview.postMessage({
+                                        type: 'requestCompletions',
+                                        requestId: requestId,
+                                        code: code,
+                                        line: position.lineNumber,
+                                        column: position.column,
+                                        triggerKind: context.triggerKind,
+                                        triggerCharacter: context.triggerCharacter
+                                    });
+                                } catch (error) {
+                                    console.error('Error sending completion request:', error);
+                                    delete pendingCompletions[requestId];
+                                    resolve({ suggestions: [] });
+                                }
                             } else {
-                                console.log('WebView not available');
+                                console.error('WebView not available - window.chrome.webview is null');
                                 delete pendingCompletions[requestId];
                                 resolve({ suggestions: [] });
                             }
                         });
+                    },
+                    // Optional: resolveCompletionItem - allows Monaco to request additional details on-demand
+                    // This is more efficient than sending all documentation upfront
+                    resolveCompletionItem: function(item, token) {
+                        // If we already have documentation, return as-is
+                        if (item.documentation && item.documentation.value) {
+                            return Promise.resolve(item);
+                        }
+                        
+                        // Otherwise, we could request additional details from C# here
+                        // For now, return the item as-is (standard pattern when no additional resolution needed)
+                        return Promise.resolve(item);
                     }
                 });
                 
@@ -461,7 +587,9 @@
                         });
                     }
                 });
-            }
+            })(); // Immediately invoke to register providers
+            
+            console.log('IntelliSense providers registered for Python');
             
             isInitialized = true;
             
@@ -491,8 +619,15 @@
             setLanguage: function(language) {
                 if (editor) {
                     const mappedLanguage = languageMap[language.toLowerCase()] || language;
+                    const previousLanguage = currentLanguage;
                     currentLanguage = mappedLanguage;
                     monaco.editor.setModelLanguage(editor.getModel(), mappedLanguage);
+                    
+                    // If switching to Python and providers weren't registered, register them now
+                    if (mappedLanguage === 'python' && previousLanguage !== 'python') {
+                        console.log('Language changed to Python, ensuring providers are registered');
+                        // Providers are already registered globally, so they should work
+                    }
                 }
             },
             

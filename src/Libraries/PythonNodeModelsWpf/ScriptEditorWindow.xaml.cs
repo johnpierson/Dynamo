@@ -271,35 +271,57 @@ namespace PythonNodeModelsWpf
         {
             try
             {
+                dynamoViewModel.Model.Logger.Log($"=== Monaco Completion Request START ===");
+                dynamoViewModel.Model.Logger.Log($"RequestId: {e.RequestId}");
+                dynamoViewModel.Model.Logger.Log($"Code length: {e.Code?.Length ?? 0}");
+                dynamoViewModel.Model.Logger.Log($"Line: {e.Line}, Column: {e.Column}");
+                
                 if (completionProvider == null)
                 {
-                    dynamoViewModel.Model.Logger.Log("Monaco completion: completionProvider is null");
+                    dynamoViewModel.Model.Logger.Log("ERROR: Monaco completion: completionProvider is null");
+                    await MonacoEditor.SendCompletionsAsync(e.RequestId, new System.Collections.Generic.List<MonacoCompletionItem>());
+                    return;
+                }
+
+                if (!completionProvider.IsReady)
+                {
+                    dynamoViewModel.Model.Logger.Log("ERROR: Monaco completion: completionProvider is not ready (no matching Python engine found)");
                     await MonacoEditor.SendCompletionsAsync(e.RequestId, new System.Collections.Generic.List<MonacoCompletionItem>());
                     return;
                 }
 
                 // Log the code being sent for debugging
-                dynamoViewModel.Model.Logger.Log($"Monaco completion request: code length={e.Code?.Length ?? 0}, line={e.Line}, column={e.Column}");
                 if (!string.IsNullOrEmpty(e.Code) && e.Code.Length > 0)
                 {
-                    var lastChars = e.Code.Length > 100 ? e.Code.Substring(e.Code.Length - 100) : e.Code;
-                    dynamoViewModel.Model.Logger.Log($"Last 100 chars: {lastChars}");
+                    var lastChars = e.Code.Length > 150 ? e.Code.Substring(e.Code.Length - 150) : e.Code;
+                    dynamoViewModel.Model.Logger.Log($"Last 150 chars of code: {lastChars}");
+                    dynamoViewModel.Model.Logger.Log($"Full code ends with: ...{e.Code.Substring(Math.Max(0, e.Code.Length - 20))}");
+                }
+                else
+                {
+                    dynamoViewModel.Model.Logger.Log("WARNING: Code is null or empty!");
                 }
 
                 // Get completions from Python completion provider
                 // The code should include everything up to and including the cursor position (including the '.' character)
                 // This matches AvalonEdit's behavior: editText.Text.Substring(0, editText.CaretOffset)
+                dynamoViewModel.Model.Logger.Log($"Calling completionProvider.GetCompletionData (Engine: {NodeModel?.EngineName ?? "unknown"})...");
                 var completions = completionProvider.GetCompletionData(e.Code, false);
                 
                 dynamoViewModel.Model.Logger.Log($"Monaco completion: received {completions?.Length ?? 0} completions");
                 if (completions != null && completions.Length > 0)
                 {
-                    var firstFew = string.Join(", ", completions.Take(5).Select(c => c.Text));
-                    dynamoViewModel.Model.Logger.Log($"First few completions: {firstFew}");
+                    var firstFew = string.Join(", ", completions.Take(10).Select(c => c.Text));
+                    dynamoViewModel.Model.Logger.Log($"First 10 completions: {firstFew}");
+                }
+                else
+                {
+                    dynamoViewModel.Model.Logger.Log("WARNING: No completions returned from provider!");
                 }
                 
                 if (completions == null || completions.Length == 0)
                 {
+                    dynamoViewModel.Model.Logger.Log("Sending empty completion list to Monaco");
                     await MonacoEditor.SendCompletionsAsync(e.RequestId, new System.Collections.Generic.List<MonacoCompletionItem>());
                     return;
                 }
@@ -317,31 +339,33 @@ namespace PythonNodeModelsWpf
                         SortText = completion.Text
                     };
 
-                    // Map completion type to Monaco kind
-                    // Since IronPythonCompletionData doesn't expose the CompletionType directly,
-                    // we'll use a simple heuristic based on naming conventions
-                    if (completion is IronPythonCompletionData)
+                    // Map completion type to Monaco kind using actual CompletionType
+                    if (completion is IronPythonCompletionData ironPythonCompletion)
                     {
-                        var text = completion.Text;
-                        if (!string.IsNullOrEmpty(text))
+                        // Map IronPythonCompletionData.CompletionType to Monaco CompletionItemKind
+                        switch (ironPythonCompletion.CompletionTypeValue)
                         {
-                            // Simple heuristics: uppercase start = class, lowercase = method/property
-                            if (char.IsUpper(text[0]) && text.Length > 1 && char.IsLower(text[1]))
-                            {
+                            case IronPythonCompletionData.CompletionType.CLASS:
                                 monacoItem.Kind = "Class";
-                            }
-                            else if (text.StartsWith("__") && text.EndsWith("__"))
-                            {
-                                monacoItem.Kind = "Method"; // Magic methods
-                            }
-                            else
-                            {
-                                monacoItem.Kind = "Method"; // Default to method for Python
-                            }
-                        }
-                        else
-                        {
-                            monacoItem.Kind = "Text";
+                                break;
+                            case IronPythonCompletionData.CompletionType.METHOD:
+                                monacoItem.Kind = "Method";
+                                break;
+                            case IronPythonCompletionData.CompletionType.PROPERTY:
+                                monacoItem.Kind = "Property";
+                                break;
+                            case IronPythonCompletionData.CompletionType.FIELD:
+                                monacoItem.Kind = "Field";
+                                break;
+                            case IronPythonCompletionData.CompletionType.NAMESPACE:
+                                monacoItem.Kind = "Module";
+                                break;
+                            case IronPythonCompletionData.CompletionType.ENUM:
+                                monacoItem.Kind = "Enum";
+                                break;
+                            default:
+                                monacoItem.Kind = "Text";
+                                break;
                         }
                     }
                     else
@@ -352,11 +376,14 @@ namespace PythonNodeModelsWpf
                     monacoCompletions.Add(monacoItem);
                 }
 
+                dynamoViewModel.Model.Logger.Log($"Sending {monacoCompletions.Count} completion items to Monaco");
                 await MonacoEditor.SendCompletionsAsync(e.RequestId, monacoCompletions);
+                dynamoViewModel.Model.Logger.Log($"=== Monaco Completion Request END ===");
             }
             catch (Exception ex)
             {
-                dynamoViewModel.Model.Logger.Log($"Failed to get Python completions: {ex.Message}");
+                dynamoViewModel.Model.Logger.Log($"ERROR: Failed to get Python completions: {ex.Message}");
+                dynamoViewModel.Model.Logger.Log($"Stack trace: {ex.StackTrace}");
                 await MonacoEditor.SendCompletionsAsync(e.RequestId, new System.Collections.Generic.List<MonacoCompletionItem>());
             }
         }
@@ -926,6 +953,9 @@ namespace PythonNodeModelsWpf
                 {
                     MonacoEditor.ContentChanged -= OnMonacoContentChanged;
                     MonacoEditor.EditorReady -= OnMonacoEditorReady;
+                    MonacoEditor.CompletionRequested -= OnMonacoCompletionRequested;
+                    MonacoEditor.HoverRequested -= OnMonacoHoverRequested;
+                    MonacoEditor.SignatureRequested -= OnMonacoSignatureRequested;
                     MonacoEditor.Dispose();
                     MonacoEditor = null;
                 }

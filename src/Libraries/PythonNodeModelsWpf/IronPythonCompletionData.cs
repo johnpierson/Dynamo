@@ -50,13 +50,19 @@ namespace Dynamo.Python
         internal IronPythonCompletionData(IExternalCodeCompletionData data)
         {
             Text = data.Text;
+            CompletionTypeValue = ConvertCompletionType(data.CompletionType);
 
             BuildCompletionTypeToIconMap();
 
-            Image = TypeToIcon[ConvertCompletionType(data.CompletionType)];
+            Image = TypeToIcon[CompletionTypeValue];
 
             description = new Lazy<string>(() => data.Description);
         }
+
+        /// <summary>
+        /// Exposes the CompletionType for use by Monaco Editor and other consumers
+        /// </summary>
+        public CompletionType CompletionTypeValue { get; private set; }
 
         public System.Windows.Media.ImageSource Image { get; }
 

@@ -80,10 +80,25 @@ namespace Dynamo.Python
         #endregion
 
         #region Methods
+        /// <summary>
+        /// Gets whether the completion provider is properly initialized and ready to provide completions.
+        /// </summary>
+        internal bool IsReady => providerImplementation != null;
+
         internal ICompletionData[] GetCompletionData(string code, bool expand = false)
         {
-            return this.providerImplementation?.GetCompletionData(code, expand).
-                Select(x => new IronPythonCompletionData(x)).ToArray();
+            if (providerImplementation == null)
+            {
+                return Array.Empty<ICompletionData>();
+            }
+
+            var completionData = providerImplementation.GetCompletionData(code, expand);
+            if (completionData == null || completionData.Length == 0)
+            {
+                return Array.Empty<ICompletionData>();
+            }
+
+            return completionData.Select(x => new IronPythonCompletionData(x)).ToArray();
         }
         #endregion
 
