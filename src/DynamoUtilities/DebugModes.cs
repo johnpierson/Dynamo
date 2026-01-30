@@ -55,6 +55,7 @@ namespace Dynamo.Utilities
             // Register app wide new debug modes here.
             AddDebugMode("DumpByteCode", "Dumps bytecode to a log file in a folder called ByteCodeLogs located in the current working dirrectory.", false);
             AddDebugMode("CrashOnNewNodeModel", "Crash when creating a new NodeModel. Works only on Debug builds", false);
+            AddDebugMode("CheckDocumentation", "Validates node documentation on startup and generates a report", false);
         }
 
         internal static void LoadDebugModesStatusFromConfig(string configPath)
