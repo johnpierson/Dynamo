@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -2514,6 +2515,40 @@ namespace Dynamo.Controls
             debugModesWindow.Owner = this;
             debugModesWindow.WindowStartupLocation = WindowStartupLocation.CenterOwner;
             debugModesWindow.ShowDialog();
+        }
+
+        private void OnAuditNodeHelpDocsClick(object sender, RoutedEventArgs e)
+        {
+            const string documentationBrowserExtensionId = "68B45FC0-0BD1-435C-BF28-B97CB03C71C8";
+            var extension = viewExtensionManager?.ViewExtensions
+                ?.FirstOrDefault(ext => (ext as IViewExtension)?.UniqueId == documentationBrowserExtensionId);
+
+            if (extension == null)
+            {
+                dynamoViewModel.ToastManager.CreateRealTimeInfoWindow(
+                    "Documentation Browser extension is not available.", true);
+                return;
+            }
+
+            var auditMethod = extension.GetType()
+                .GetMethod("RunNodeHelpAudit", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            if (auditMethod == null)
+            {
+                dynamoViewModel.ToastManager.CreateRealTimeInfoWindow(
+                    "Node help audit command was not found.", true);
+                return;
+            }
+
+            try
+            {
+                auditMethod.Invoke(extension, null);
+            }
+            catch (Exception ex)
+            {
+                dynamoViewModel.ToastManager.CreateRealTimeInfoWindow(
+                    $"Node help audit failed to start: {ex.Message}", true);
+            }
         }
 
         private void OnPreferencesWindowClick(object sender, RoutedEventArgs e)

@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Security.Permissions;
+using System.Text;
 using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
@@ -15,12 +16,14 @@ using Dynamo.Graph.Workspaces;
 using Dynamo.Logging;
 using Dynamo.Models;
 using Dynamo.PackageManager;
+using Dynamo.Search.SearchElements;
 using Dynamo.Selection;
 using Dynamo.ViewModels;
 using Dynamo.Wpf.Extensions;
 using Dynamo.Wpf.Interfaces;
 using DynamoProperties = Dynamo.Properties;
 using MenuItem = System.Windows.Controls.MenuItem;
+using Microsoft.Win32;
 
 namespace Dynamo.DocumentationBrowser
 {
@@ -406,6 +409,266 @@ namespace Dynamo.DocumentationBrowser
         {
             // Add documentation files from the package to the DocManager
             PackageDocumentationManager.Instance.AddPackageDocumentation(pkg.NodeDocumentaionDirectory, pkg.Name);
+        }
+
+        internal void RunNodeHelpAudit()
+        {
+            if (DynamoViewModel == null || ViewModel == null)
+            {
+                OnMessageLogged(LogMessage.Warning(Resources.NodeHelpAuditNotReady, WarningLevel.Mild));
+                return;
+            }
+
+            var docManager = PackageDocumentationManager.Instance;
+            if (docManager == null)
+            {
+                OnMessageLogged(LogMessage.Warning(Resources.NodeHelpAuditManagerMissing, WarningLevel.Mild));
+                return;
+            }
+
+            var saveDialog = new SaveFileDialog
+            {
+                Filter = Resources.NodeHelpAuditSaveDialogFilter,
+                DefaultExt = ".csv",
+                AddExtension = true,
+                FileName = $"NodeHelpAudit_{DateTime.Now:yyyyMMdd_HHmmss}.csv",
+                Title = Resources.NodeHelpAuditSaveDialogTitle
+            };
+
+            var owner = viewLoadedParamsReference?.DynamoWindow;
+            var dialogResult = owner == null ? saveDialog.ShowDialog() : saveDialog.ShowDialog(owner);
+            if (dialogResult != true)
+            {
+                return;
+            }
+
+            var targetPath = saveDialog.FileName;
+            try
+            {
+                var entries = DynamoViewModel.Model?.SearchModel?.Entries?.Where(entry => entry.IsVisibleInSearch).ToList();
+                if (entries == null)
+                {
+                    OnMessageLogged(LogMessage.Warning(Resources.NodeHelpAuditNoEntries, WarningLevel.Mild));
+                    return;
+                }
+
+                var packages = pmExtension?.PackageLoader?.LocalPackages?.ToList() ?? new List<Package>();
+                var packageRoots = BuildPackageRootIndex(packages);
+                var packageAssemblies = BuildPackageAssemblyLookup(packages);
+
+                var csv = new StringBuilder();
+                csv.AppendLine(Resources.NodeHelpAuditCsvHeader);
+
+                foreach (var entry in entries)
+                {
+                    try
+                    {
+                        var node = entry.CreateNode();
+                        var minimumQualifiedName = DynamoViewModel.GetMinimumQualifiedName(node);
+                        var packageName = ResolvePackageName(entry, packageRoots, packageAssemblies);
+
+                        var mdPath = docManager.GetAnnotationDoc(minimumQualifiedName, packageName) ?? string.Empty;
+                        var isBuiltInByPath = !string.IsNullOrEmpty(packageName) && ViewModel.IsBuiltInDocPath(mdPath);
+                        var isOwnedByPackage = !string.IsNullOrEmpty(packageName) && !isBuiltInByPath;
+
+                        var sampleGraphPath = string.IsNullOrWhiteSpace(mdPath)
+                            ? string.Empty
+                            : ViewModel.DynamoGraphFromMDFilePath(mdPath, isOwnedByPackage);
+
+                        var missingMd = string.IsNullOrWhiteSpace(mdPath) || !File.Exists(mdPath);
+                        var missingDyn = string.IsNullOrWhiteSpace(sampleGraphPath) || !File.Exists(sampleGraphPath);
+
+                        var category = entry.FullCategoryName ?? string.Empty;
+                        var library = GetLibraryName(category);
+
+                        csv.AppendLine(string.Join(",",
+                            EscapeCsv(library),
+                            EscapeCsv(category),
+                            EscapeCsv(entry.Name),
+                            EscapeCsv(entry.FullName),
+                            missingMd,
+                            missingDyn,
+                            EscapeCsv(mdPath),
+                            EscapeCsv(sampleGraphPath)));
+                    }
+                    catch (Exception ex)
+                    {
+                        OnMessageLogged(LogMessage.Warning(string.Format(Resources.NodeHelpAuditEntryFailed, entry.FullName, ex.Message), WarningLevel.Mild));
+                    }
+                }
+
+                File.WriteAllText(targetPath, csv.ToString(), new UTF8Encoding(false));
+                DynamoViewModel.ToastManager.CreateRealTimeInfoWindow(string.Format(Resources.NodeHelpAuditCompleted, targetPath), true);
+            }
+            catch (Exception ex)
+            {
+                OnMessageLogged(LogMessage.Warning(string.Format(Resources.NodeHelpAuditFailed, ex.Message), WarningLevel.Mild));
+            }
+        }
+
+        private static string EscapeCsv(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            if (value.Contains("\"") || value.Contains(",") || value.Contains("\n") || value.Contains("\r"))
+            {
+                return "\"" + value.Replace("\"", "\"\"") + "\"";
+            }
+
+            return value;
+        }
+
+        private static string GetLibraryName(string category)
+        {
+            if (string.IsNullOrWhiteSpace(category))
+            {
+                return string.Empty;
+            }
+
+            var separatorIndex = category.IndexOf('.');
+            return separatorIndex > 0 ? category.Substring(0, separatorIndex) : category;
+        }
+
+        private static List<(string Root, string Name)> BuildPackageRootIndex(IEnumerable<Package> packages)
+        {
+            var roots = new List<(string Root, string Name)>();
+            foreach (var package in packages)
+            {
+                if (string.IsNullOrWhiteSpace(package?.RootDirectory))
+                {
+                    continue;
+                }
+
+                roots.Add((NormalizeDirectory(package.RootDirectory), package.Name));
+            }
+
+            return roots;
+        }
+
+        private static PackageAssemblyLookup BuildPackageAssemblyLookup(IEnumerable<Package> packages)
+        {
+            var byPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var byFileName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var package in packages)
+            {
+                if (package?.LoadedAssemblies == null)
+                {
+                    continue;
+                }
+
+                foreach (var assembly in package.LoadedAssemblies)
+                {
+                    var localPath = assembly?.LocalFilePath;
+                    if (string.IsNullOrWhiteSpace(localPath))
+                    {
+                        continue;
+                    }
+
+                    var fullPath = Path.GetFullPath(localPath);
+                    if (!byPath.ContainsKey(fullPath))
+                    {
+                        byPath.Add(fullPath, package.Name);
+                    }
+
+                    var fileName = Path.GetFileName(fullPath);
+                    if (!string.IsNullOrWhiteSpace(fileName) && !byFileName.ContainsKey(fileName))
+                    {
+                        byFileName.Add(fileName, package.Name);
+                    }
+                }
+            }
+
+            return new PackageAssemblyLookup(byPath, byFileName);
+        }
+
+        private static string ResolvePackageName(NodeSearchElement entry, List<(string Root, string Name)> packageRoots, PackageAssemblyLookup packageAssemblies)
+        {
+            if (entry == null || packageRoots == null || packageRoots.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            if (!entry.ElementType.HasFlag(ElementTypes.Packaged))
+            {
+                return string.Empty;
+            }
+
+            var path = GetEntryPath(entry);
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                var fullPath = Path.GetFullPath(path);
+                foreach (var root in packageRoots)
+                {
+                    if (fullPath.StartsWith(root.Root, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return root.Name ?? string.Empty;
+                    }
+                }
+            }
+
+            if (packageAssemblies != null)
+            {
+                var assemblyPath = entry.Assembly ?? string.Empty;
+                if (Path.IsPathRooted(assemblyPath))
+                {
+                    var fullAssemblyPath = Path.GetFullPath(assemblyPath);
+                    if (packageAssemblies.ByPath.TryGetValue(fullAssemblyPath, out var packageName))
+                    {
+                        return packageName ?? string.Empty;
+                    }
+                }
+
+                var assemblyFileName = Path.GetFileName(assemblyPath);
+                if (!string.IsNullOrWhiteSpace(assemblyFileName) &&
+                    packageAssemblies.ByFileName.TryGetValue(assemblyFileName, out var packageByFileName))
+                {
+                    return packageByFileName ?? string.Empty;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string GetEntryPath(NodeSearchElement entry)
+        {
+            if (entry is CustomNodeSearchElement customNode && !string.IsNullOrWhiteSpace(customNode.Path))
+            {
+                return customNode.Path;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entry.Assembly) && Path.IsPathRooted(entry.Assembly))
+            {
+                return entry.Assembly;
+            }
+
+            return string.Empty;
+        }
+
+        private static string NormalizeDirectory(string path)
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (!fullPath.EndsWith(Path.DirectorySeparatorChar.ToString()))
+            {
+                fullPath += Path.DirectorySeparatorChar;
+            }
+
+            return fullPath;
+        }
+
+        private sealed class PackageAssemblyLookup
+        {
+            internal PackageAssemblyLookup(Dictionary<string, string> byPath, Dictionary<string, string> byFileName)
+            {
+                ByPath = byPath ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                ByFileName = byFileName ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            internal Dictionary<string, string> ByPath { get; }
+            internal Dictionary<string, string> ByFileName { get; }
         }
 
         private void MenuItemUnCheckedHandler(object sender, RoutedEventArgs e)
