@@ -52,6 +52,9 @@
             geometry integration.
             </summary>
         </member>
+        <member name="M:Autodesk.DesignScript.Geometry.Core.EntityTags.#ctor(System.Collections.Generic.Dictionary{System.String,System.Object},Autodesk.DesignScript.Geometry.DesignScriptEntity)">
+            <notranslation>true</notranslation>
+        </member>
         <member name="P:Autodesk.DesignScript.Geometry.Core.EntityTags.Parent">
             <notranslation>true</notranslation>
         </member>
@@ -4841,7 +4844,7 @@
             This is used for testing only.
             </summary>
         </member>
-        <member name="P:Autodesk.DesignScript.Geometry.DesignScriptEntity.Tags">
+        <member name="F:Autodesk.DesignScript.Geometry.DesignScriptEntity.Tags">
             <notranslation>true</notranslation>
         </member>
         <member name="M:Autodesk.DesignScript.Geometry.DesignScriptEntity.Dispose">
@@ -5008,16 +5011,6 @@
             Get the intersection of Geometry for this object and a collection of other Geometries. Finds common geometry of all participants.
             </summary>
             <search>get overlap,multi intersect,intersect many</search>
-        </member>
-        <member name="M:Autodesk.DesignScript.Geometry.Geometry.ProjectMany(System.Collections.Generic.IEnumerable{Autodesk.DesignScript.Geometry.Point},Autodesk.DesignScript.Geometry.Vector)">
-            <summary>
-            Projects a collection of Points onto this Geometry along the specified direction.
-            Returns a flat array of resulting Geometry.
-            </summary>
-            <param name="points">Points to project</param>
-            <param name="projectionDirection">Projection direction</param>
-            <returns>Flat array of resulting Geometry</returns>
-            <search>project points,batch project</search>
         </member>
         <member name="M:Autodesk.DesignScript.Geometry.Geometry.Split(Autodesk.DesignScript.Geometry.Geometry)">
             <summary>
@@ -7028,11 +7021,6 @@
         <member name="P:Autodesk.DesignScript.Geometry.Properties.Resources.polycurve_byjoinedcurves_deprecated">
             <summary>
               Looks up a localized string similar to This method is deprecated and will be removed in a future version of Dynamo. Use PolyCurve.ByJoinedCurves(Curve[] curves, double joinTolerance, bool trimCurves, double trimLength) instead.
-            </summary>
-        </member>
-        <member name="P:Autodesk.DesignScript.Geometry.Properties.Resources.point_project_deprecated">
-            <summary>
-              Looks up a localized string similar to This method is deprecated and will be removed in a future version of Dynamo. Use Geometry.ProjectMany(Point[] points, Vector projectionDirection) instead.
             </summary>
         </member>
         <member name="P:Autodesk.DesignScript.Geometry.Properties.Resources.polycurve_bythickeningcurve_depreacted">
