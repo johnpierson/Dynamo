@@ -6,6 +6,7 @@ using System.Linq;
 using System.Security.Permissions;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using Dynamo.Configuration;
@@ -448,7 +449,6 @@ namespace Dynamo.DocumentationBrowser
                 var entries = DynamoViewModel.Model?.SearchModel?.Entries?.Where(entry => entry.IsVisibleInSearch).ToList();
                 if (entries == null || entries.Count == 0)
                 {
-                    OnMessageLogged(LogMessage.Warning(Resources.NodeHelpAuditNoEntries, WarningLevel.Mild));
                     return;
                 }
 
@@ -456,58 +456,64 @@ namespace Dynamo.DocumentationBrowser
                 var packageRoots = BuildPackageRootIndex(packages);
                 var packageAssemblies = BuildPackageAssemblyLookup(packages);
 
-                var csv = new StringBuilder();
-                var csvHeader = Resources.NodeHelpAuditCsvHeader;
-                if (string.IsNullOrWhiteSpace(csvHeader))
-                {
-                    csvHeader = "Library,Category,Name,FullName,MissingMd,MissingDyn,MarkdownPath,SampleGraphPath";
-                }
-                csv.AppendLine(csvHeader);
-
-                foreach (var entry in entries)
+                _ = Task.Run(() =>
                 {
                     try
                     {
-                        var node = entry.CreateNode();
-                        var minimumQualifiedName = DynamoViewModel.GetMinimumQualifiedName(node);
-                        var packageName = ResolvePackageName(entry, packageRoots, packageAssemblies);
+                        var csv = new StringBuilder();
+                        var csvHeader = Resources.NodeHelpAuditCsvHeader;
+                        if (string.IsNullOrWhiteSpace(csvHeader))
+                        {
+                            csvHeader = "Library,Category,Name,FullName,MissingMd,MissingDyn,MarkdownPath,SampleGraphPath";
+                        }
+                        csv.AppendLine(csvHeader);
 
-                        var mdPath = docManager.GetAnnotationDoc(minimumQualifiedName, packageName) ?? string.Empty;
-                        var isBuiltInByPath = !string.IsNullOrEmpty(packageName) && ViewModel.IsBuiltInDocPath(mdPath);
-                        var isOwnedByPackage = !string.IsNullOrEmpty(packageName) && !isBuiltInByPath;
+                        foreach (var entry in entries)
+                        {
+                            try
+                            {
+                                var node = entry.CreateNode();
+                                var minimumQualifiedName = DynamoViewModel.GetMinimumQualifiedName(node);
+                                var packageName = ResolvePackageName(entry, packageRoots, packageAssemblies);
 
-                        var sampleGraphPath = string.IsNullOrWhiteSpace(mdPath)
-                            ? string.Empty
-                            : ViewModel.DynamoGraphFromMDFilePath(mdPath, isOwnedByPackage);
+                                var mdPath = docManager.GetAnnotationDoc(minimumQualifiedName, packageName) ?? string.Empty;
+                                var isBuiltInByPath = !string.IsNullOrEmpty(packageName) && ViewModel.IsBuiltInDocPath(mdPath);
+                                var isOwnedByPackage = !string.IsNullOrEmpty(packageName) && !isBuiltInByPath;
 
-                        var missingMd = string.IsNullOrWhiteSpace(mdPath) || !File.Exists(mdPath);
-                        var missingDyn = string.IsNullOrWhiteSpace(sampleGraphPath) || !File.Exists(sampleGraphPath);
+                                var sampleGraphPath = string.IsNullOrWhiteSpace(mdPath)
+                                    ? string.Empty
+                                    : ViewModel.DynamoGraphFromMDFilePath(mdPath, isOwnedByPackage);
 
-                        var category = entry.FullCategoryName ?? string.Empty;
-                        var library = GetLibraryName(category);
+                                var missingMd = string.IsNullOrWhiteSpace(mdPath) || !File.Exists(mdPath);
+                                var missingDyn = string.IsNullOrWhiteSpace(sampleGraphPath) || !File.Exists(sampleGraphPath);
 
-                        csv.AppendLine(string.Join(",",
-                            EscapeCsv(library),
-                            EscapeCsv(category),
-                            EscapeCsv(entry.Name),
-                            EscapeCsv(entry.FullName),
-                            missingMd,
-                            missingDyn,
-                            EscapeCsv(mdPath),
-                            EscapeCsv(sampleGraphPath)));
+                                var category = entry.FullCategoryName ?? string.Empty;
+                                var library = GetLibraryName(category);
+
+                                csv.AppendLine(string.Join(",",
+                                    EscapeCsv(library),
+                                    EscapeCsv(category),
+                                    EscapeCsv(entry.Name),
+                                    EscapeCsv(entry.FullName),
+                                    missingMd,
+                                    missingDyn,
+                                    EscapeCsv(mdPath),
+                                    EscapeCsv(sampleGraphPath)));
+                            }
+                            catch (Exception ex)
+                            {
+                            }
+                        }
+
+                        File.WriteAllText(targetPath, csv.ToString(), new UTF8Encoding(false));
                     }
                     catch (Exception ex)
                     {
-                        OnMessageLogged(LogMessage.Warning(string.Format(Resources.NodeHelpAuditEntryFailed, entry.FullName, ex.Message), WarningLevel.Mild));
                     }
-                }
-
-                File.WriteAllText(targetPath, csv.ToString(), new UTF8Encoding(false));
-                DynamoViewModel.ToastManager.CreateRealTimeInfoWindow(string.Format(Resources.NodeHelpAuditCompleted, targetPath), true);
+                });
             }
             catch (Exception ex)
             {
-                OnMessageLogged(LogMessage.Warning(string.Format(Resources.NodeHelpAuditFailed, ex.Message), WarningLevel.Mild));
             }
         }
 
