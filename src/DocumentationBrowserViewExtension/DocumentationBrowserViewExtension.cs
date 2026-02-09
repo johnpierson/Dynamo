@@ -457,7 +457,12 @@ namespace Dynamo.DocumentationBrowser
                 var packageAssemblies = BuildPackageAssemblyLookup(packages);
 
                 var csv = new StringBuilder();
-                csv.AppendLine(Resources.NodeHelpAuditCsvHeader);
+                var csvHeader = Resources.NodeHelpAuditCsvHeader;
+                if (string.IsNullOrWhiteSpace(csvHeader))
+                {
+                    csvHeader = "Library,Category,Name,FullName,MissingMd,MissingDyn,MarkdownPath,SampleGraphPath";
+                }
+                csv.AppendLine(csvHeader);
 
                 foreach (var entry in entries)
                 {
