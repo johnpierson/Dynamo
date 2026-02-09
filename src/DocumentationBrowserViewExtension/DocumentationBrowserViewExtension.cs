@@ -5,7 +5,9 @@ using System.IO;
 using System.Linq;
 using System.Security.Permissions;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using Dynamo.Configuration;
@@ -448,7 +450,6 @@ namespace Dynamo.DocumentationBrowser
                 var entries = DynamoViewModel.Model?.SearchModel?.Entries?.Where(entry => entry.IsVisibleInSearch).ToList();
                 if (entries == null || entries.Count == 0)
                 {
-                    OnMessageLogged(LogMessage.Warning(Resources.NodeHelpAuditNoEntries, WarningLevel.Mild));
                     return;
                 }
 
@@ -456,58 +457,70 @@ namespace Dynamo.DocumentationBrowser
                 var packageRoots = BuildPackageRootIndex(packages);
                 var packageAssemblies = BuildPackageAssemblyLookup(packages);
 
-                var csv = new StringBuilder();
-                var csvHeader = Resources.NodeHelpAuditCsvHeader;
-                if (string.IsNullOrWhiteSpace(csvHeader))
-                {
-                    csvHeader = "Library,Category,Name,FullName,MissingMd,MissingDyn,MarkdownPath,SampleGraphPath";
-                }
-                csv.AppendLine(csvHeader);
-
-                foreach (var entry in entries)
+                _ = Task.Run(() =>
                 {
                     try
                     {
-                        var node = entry.CreateNode();
-                        var minimumQualifiedName = DynamoViewModel.GetMinimumQualifiedName(node);
-                        var packageName = ResolvePackageName(entry, packageRoots, packageAssemblies);
+                        var csv = new StringBuilder();
+                        var csvHeader = Resources.NodeHelpAuditCsvHeader;
+                        if (string.IsNullOrWhiteSpace(csvHeader))
+                        {
+                            csvHeader = "Library,Category,Name,FullName,MissingMd,MissingDyn,MissingImage,MarkdownPath,SampleGraphPath,ImagePaths";
+                        }
+                        csv.AppendLine(csvHeader);
 
-                        var mdPath = docManager.GetAnnotationDoc(minimumQualifiedName, packageName) ?? string.Empty;
-                        var isBuiltInByPath = !string.IsNullOrEmpty(packageName) && ViewModel.IsBuiltInDocPath(mdPath);
-                        var isOwnedByPackage = !string.IsNullOrEmpty(packageName) && !isBuiltInByPath;
+                        foreach (var entry in entries)
+                        {
+                            try
+                            {
+                                var node = entry.CreateNode();
+                                var minimumQualifiedName = DynamoViewModel.GetMinimumQualifiedName(node);
+                                var packageName = ResolvePackageName(entry, packageRoots, packageAssemblies);
 
-                        var sampleGraphPath = string.IsNullOrWhiteSpace(mdPath)
-                            ? string.Empty
-                            : ViewModel.DynamoGraphFromMDFilePath(mdPath, isOwnedByPackage);
+                                var mdPath = docManager.GetAnnotationDoc(minimumQualifiedName, packageName) ?? string.Empty;
+                                var isBuiltInByPath = !string.IsNullOrEmpty(packageName) && ViewModel.IsBuiltInDocPath(mdPath);
+                                var isOwnedByPackage = !string.IsNullOrEmpty(packageName) && !isBuiltInByPath;
 
-                        var missingMd = string.IsNullOrWhiteSpace(mdPath) || !File.Exists(mdPath);
-                        var missingDyn = string.IsNullOrWhiteSpace(sampleGraphPath) || !File.Exists(sampleGraphPath);
+                                var sampleGraphPath = string.IsNullOrWhiteSpace(mdPath)
+                                    ? string.Empty
+                                    : ViewModel.DynamoGraphFromMDFilePath(mdPath, isOwnedByPackage);
 
-                        var category = entry.FullCategoryName ?? string.Empty;
-                        var library = GetLibraryName(category);
+                                var missingMd = string.IsNullOrWhiteSpace(mdPath) || !File.Exists(mdPath);
+                                var missingDyn = string.IsNullOrWhiteSpace(sampleGraphPath) || !File.Exists(sampleGraphPath);
 
-                        csv.AppendLine(string.Join(",",
-                            EscapeCsv(library),
-                            EscapeCsv(category),
-                            EscapeCsv(entry.Name),
-                            EscapeCsv(entry.FullName),
-                            missingMd,
-                            missingDyn,
-                            EscapeCsv(mdPath),
-                            EscapeCsv(sampleGraphPath)));
+                                var imagePaths = GetImagePathsFromMarkdownFile(mdPath);
+                                var missingImage = imagePaths.Count > 0 && imagePaths.Any(path => !File.Exists(path));
+                                var imagePathsValue = imagePaths.Count == 0 ? string.Empty : string.Join(";", imagePaths);
+
+                                var category = entry.FullCategoryName ?? string.Empty;
+                                var library = GetLibraryName(category);
+
+                                csv.AppendLine(string.Join(",",
+                                    EscapeCsv(library),
+                                    EscapeCsv(category),
+                                    EscapeCsv(entry.Name),
+                                    EscapeCsv(entry.FullName),
+                                    missingMd,
+                                    missingDyn,
+                                    missingImage,
+                                    EscapeCsv(mdPath),
+                                    EscapeCsv(sampleGraphPath),
+                                    EscapeCsv(imagePathsValue)));
+                            }
+                            catch (Exception)
+                            {
+                            }
+                        }
+
+                        File.WriteAllText(targetPath, csv.ToString(), new UTF8Encoding(false));
                     }
-                    catch (Exception ex)
+                    catch (Exception)
                     {
-                        OnMessageLogged(LogMessage.Warning(string.Format(Resources.NodeHelpAuditEntryFailed, entry.FullName, ex.Message), WarningLevel.Mild));
                     }
-                }
-
-                File.WriteAllText(targetPath, csv.ToString(), new UTF8Encoding(false));
-                DynamoViewModel.ToastManager.CreateRealTimeInfoWindow(string.Format(Resources.NodeHelpAuditCompleted, targetPath), true);
+                });
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                OnMessageLogged(LogMessage.Warning(string.Format(Resources.NodeHelpAuditFailed, ex.Message), WarningLevel.Mild));
             }
         }
 
@@ -524,6 +537,84 @@ namespace Dynamo.DocumentationBrowser
             }
 
             return value;
+        }
+
+        private static List<string> GetImagePathsFromMarkdownFile(string markdownPath)
+        {
+            if (string.IsNullOrWhiteSpace(markdownPath) || !File.Exists(markdownPath))
+            {
+                return new List<string>();
+            }
+
+            string markdownContent;
+            try
+            {
+                markdownContent = File.ReadAllText(markdownPath);
+            }
+            catch
+            {
+                return new List<string>();
+            }
+
+            if (string.IsNullOrWhiteSpace(markdownContent))
+            {
+                return new List<string>();
+            }
+
+            var baseDirectory = Path.GetDirectoryName(markdownPath);
+            if (string.IsNullOrWhiteSpace(baseDirectory))
+            {
+                return new List<string>();
+            }
+
+            var results = new List<string>();
+
+            foreach (Match match in Regex.Matches(markdownContent, @"!\[[^\]]*\]\((?<path>[^)\s]+)[^)]*\)", RegexOptions.IgnoreCase))
+            {
+                AddImagePath(match.Groups["path"].Value, baseDirectory, results);
+            }
+
+            foreach (Match match in Regex.Matches(markdownContent, "<img[^>]+src=[\"'](?<path>[^\"']+)[\"']", RegexOptions.IgnoreCase))
+            {
+                AddImagePath(match.Groups["path"].Value, baseDirectory, results);
+            }
+
+            return results.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        private static void AddImagePath(string rawPath, string baseDirectory, List<string> results)
+        {
+            if (string.IsNullOrWhiteSpace(rawPath))
+            {
+                return;
+            }
+
+            var trimmed = rawPath.Trim().Trim('"', '\'');
+            if (trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+            {
+                if (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+                {
+                    return;
+                }
+
+                if (uri.Scheme == Uri.UriSchemeFile)
+                {
+                    results.Add(uri.LocalPath);
+                    return;
+                }
+            }
+
+            var unescaped = Uri.UnescapeDataString(trimmed);
+            var combined = Path.IsPathRooted(unescaped)
+                ? unescaped
+                : Path.Combine(baseDirectory, unescaped);
+
+            results.Add(Path.GetFullPath(combined));
         }
 
         private static string GetLibraryName(string category)
