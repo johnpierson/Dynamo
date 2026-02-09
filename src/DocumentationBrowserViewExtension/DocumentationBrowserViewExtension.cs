@@ -446,7 +446,7 @@ namespace Dynamo.DocumentationBrowser
             try
             {
                 var entries = DynamoViewModel.Model?.SearchModel?.Entries?.Where(entry => entry.IsVisibleInSearch).ToList();
-                if (entries == null)
+                if (entries == null || entries.Count == 0)
                 {
                     OnMessageLogged(LogMessage.Warning(Resources.NodeHelpAuditNoEntries, WarningLevel.Mild));
                     return;
@@ -592,7 +592,7 @@ namespace Dynamo.DocumentationBrowser
 
         private static string ResolvePackageName(NodeSearchElement entry, List<(string Root, string Name)> packageRoots, PackageAssemblyLookup packageAssemblies)
         {
-            if (entry == null || packageRoots == null || packageRoots.Count == 0)
+            if (entry == null)
             {
                 return string.Empty;
             }
@@ -603,7 +603,7 @@ namespace Dynamo.DocumentationBrowser
             }
 
             var path = GetEntryPath(entry);
-            if (!string.IsNullOrWhiteSpace(path))
+            if (!string.IsNullOrWhiteSpace(path) && packageRoots != null && packageRoots.Count > 0)
             {
                 var fullPath = Path.GetFullPath(path);
                 foreach (var root in packageRoots)
