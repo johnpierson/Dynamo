@@ -226,7 +226,7 @@
     <value>Node help audit CSV saved to: {0}</value>
   </data>
   <data name="NodeHelpAuditCsvHeader" xml:space="preserve">
-    <value>Library,Category,Name,FullName,MissingMd,MissingDyn,MissingImage,MarkdownPath,SampleGraphPath,MissingImagePaths</value>
+    <value>Library,Category,Name,FullName,MissingMd,MissingDyn,MarkdownPath,SampleGraphPath</value>
   </data>
   <data name="NodeHelpAuditEntryFailed" xml:space="preserve">
     <value>Node help audit skipped '{0}': {1}</value>

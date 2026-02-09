@@ -7,7 +7,6 @@ using System.Security.Permissions;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Threading;
 using Dynamo.Configuration;
@@ -465,7 +464,7 @@ namespace Dynamo.DocumentationBrowser
                         var csvHeader = Resources.NodeHelpAuditCsvHeader;
                         if (string.IsNullOrWhiteSpace(csvHeader))
                         {
-                            csvHeader = "Library,Category,Name,FullName,MissingMd,MissingDyn,MissingImage,MarkdownPath,SampleGraphPath,MissingImagePaths";
+                            csvHeader = "Library,Category,Name,FullName,MissingMd,MissingDyn,MarkdownPath,SampleGraphPath";
                         }
                         csv.AppendLine(csvHeader);
 
@@ -487,8 +486,6 @@ namespace Dynamo.DocumentationBrowser
 
                                 var missingMd = string.IsNullOrWhiteSpace(mdPath) || !File.Exists(mdPath);
                                 var missingDyn = string.IsNullOrWhiteSpace(sampleGraphPath) || !File.Exists(sampleGraphPath);
-                                var missingImagePaths = missingMd ? Array.Empty<string>() : GetMissingImagePaths(mdPath);
-                                var missingImage = missingImagePaths.Count > 0;
 
                                 var category = entry.FullCategoryName ?? string.Empty;
                                 var library = GetLibraryName(category);
@@ -500,10 +497,8 @@ namespace Dynamo.DocumentationBrowser
                                     EscapeCsv(entry.FullName),
                                     missingMd,
                                     missingDyn,
-                                    missingImage,
                                     EscapeCsv(mdPath),
-                                    EscapeCsv(sampleGraphPath),
-                                    EscapeCsv(string.Join(";", missingImagePaths))));
+                                    EscapeCsv(sampleGraphPath)));
                             }
                             catch (Exception ex)
                             {
@@ -535,142 +530,6 @@ namespace Dynamo.DocumentationBrowser
             }
 
             return value;
-        }
-
-        private static IReadOnlyList<string> GetMissingImagePaths(string markdownPath)
-        {
-            if (string.IsNullOrWhiteSpace(markdownPath))
-            {
-                return Array.Empty<string>();
-            }
-
-            string markdownContent;
-            try
-            {
-                markdownContent = File.ReadAllText(markdownPath);
-            }
-            catch
-            {
-                return Array.Empty<string>();
-            }
-
-            if (string.IsNullOrWhiteSpace(markdownContent))
-            {
-                return Array.Empty<string>();
-            }
-
-            var imageLinks = ExtractMarkdownImageLinks(markdownContent);
-            if (imageLinks.Count == 0)
-            {
-                return Array.Empty<string>();
-            }
-
-            var markdownDirectory = Path.GetDirectoryName(markdownPath) ?? string.Empty;
-            var missingPaths = new List<string>();
-
-            foreach (var imageLink in imageLinks)
-            {
-                var imagePath = ResolveImagePath(markdownDirectory, imageLink);
-                if (string.IsNullOrWhiteSpace(imagePath))
-                {
-                    continue;
-                }
-
-                if (!File.Exists(imagePath))
-                {
-                    missingPaths.Add(imagePath);
-                }
-            }
-
-            return missingPaths;
-        }
-
-        private static IReadOnlyList<string> ExtractMarkdownImageLinks(string markdownContent)
-        {
-            var links = new List<string>();
-            var referenceDefinitions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (Match match in Regex.Matches(markdownContent, @"^\s*\[(?<id>[^\]]+)\]:\s*(?<url>\S+)\s*$", RegexOptions.Multiline))
-            {
-                var id = match.Groups["id"].Value.Trim();
-                var url = NormalizeMarkdownLink(match.Groups["url"].Value);
-                if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(url))
-                {
-                    referenceDefinitions[id] = url;
-                }
-            }
-
-            foreach (Match match in Regex.Matches(markdownContent, @"!\[[^\]]*\]\((?<url>[^)]+)\)"))
-            {
-                var url = NormalizeMarkdownLink(match.Groups["url"].Value);
-                if (!string.IsNullOrWhiteSpace(url))
-                {
-                    links.Add(url);
-                }
-            }
-
-            foreach (Match match in Regex.Matches(markdownContent, @"!\[[^\]]*\]\[(?<id>[^\]]*)\]"))
-            {
-                var id = match.Groups["id"].Value.Trim();
-                if (string.IsNullOrWhiteSpace(id))
-                {
-                    continue;
-                }
-
-                if (referenceDefinitions.TryGetValue(id, out var url))
-                {
-                    links.Add(url);
-                }
-            }
-
-            return links;
-        }
-
-        private static string NormalizeMarkdownLink(string rawLink)
-        {
-            if (string.IsNullOrWhiteSpace(rawLink))
-            {
-                return string.Empty;
-            }
-
-            var link = rawLink.Trim();
-            var spaceIndex = link.IndexOfAny(new[] { ' ', '\t' });
-            if (spaceIndex >= 0)
-            {
-                link = link.Substring(0, spaceIndex);
-            }
-
-            if (link.StartsWith("<", StringComparison.Ordinal) && link.EndsWith(">", StringComparison.Ordinal))
-            {
-                link = link.Substring(1, link.Length - 2);
-            }
-
-            if (Uri.TryCreate(link, UriKind.Absolute, out var uri))
-            {
-                if (uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase) ||
-                    uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ||
-                    uri.Scheme.Equals("data", StringComparison.OrdinalIgnoreCase))
-                {
-                    return string.Empty;
-                }
-            }
-
-            return link;
-        }
-
-        private static string ResolveImagePath(string markdownDirectory, string imageLink)
-        {
-            if (string.IsNullOrWhiteSpace(imageLink))
-            {
-                return string.Empty;
-            }
-
-            if (Path.IsPathRooted(imageLink))
-            {
-                return imageLink;
-            }
-
-            return Path.GetFullPath(Path.Combine(markdownDirectory, imageLink));
         }
 
         private static string GetLibraryName(string category)
