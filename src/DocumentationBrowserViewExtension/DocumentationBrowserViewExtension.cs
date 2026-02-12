@@ -158,6 +158,9 @@ namespace Dynamo.DocumentationBrowser
             // subscribe to the documentation open request event from Dynamo
             this.viewLoadedParamsReference.RequestOpenDocumentationLink += HandleRequestOpenDocumentationLink;
 
+            // subscribe to node help audit request (e.g. from Debug menu)
+            this.viewLoadedParamsReference.NodeHelpAuditRequested += OnNodeHelpAuditRequested;
+
             // subscribe to property changes of DynamoViewModel so we can show/hide the browser on StartPage display
             (viewLoadedParams.DynamoWindow.DataContext as DynamoViewModel).PropertyChanged += HandleStartPageVisibilityChange;
 
@@ -411,6 +414,11 @@ namespace Dynamo.DocumentationBrowser
         {
             // Add documentation files from the package to the DocManager
             PackageDocumentationManager.Instance.AddPackageDocumentation(pkg.NodeDocumentaionDirectory, pkg.Name);
+        }
+
+        private void OnNodeHelpAuditRequested()
+        {
+            RunNodeHelpAudit();
         }
 
         internal void RunNodeHelpAudit()
@@ -783,6 +791,7 @@ namespace Dynamo.DocumentationBrowser
             if (this.viewLoadedParamsReference != null)
             {
                 this.viewLoadedParamsReference.RequestOpenDocumentationLink -= HandleRequestOpenDocumentationLink;
+                this.viewLoadedParamsReference.NodeHelpAuditRequested -= OnNodeHelpAuditRequested;
             }
 
             if (this.ViewModel != null)
