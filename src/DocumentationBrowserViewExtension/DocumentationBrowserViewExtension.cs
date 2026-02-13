@@ -465,6 +465,41 @@ namespace Dynamo.DocumentationBrowser
                 var packageRoots = BuildPackageRootIndex(packages);
                 var packageAssemblies = BuildPackageAssemblyLookup(packages);
 
+                // Collect all per-entry data on the UI thread (CreateNode, GetMinimumQualifiedName, etc. are not thread-safe).
+                var auditRows = new List<NodeHelpAuditRowDto>();
+                foreach (var entry in entries)
+                {
+                    try
+                    {
+                        var node = entry.CreateNode();
+                        var minimumQualifiedName = DynamoViewModel.GetMinimumQualifiedName(node);
+                        var packageName = ResolvePackageName(entry, packageRoots, packageAssemblies);
+
+                        var mdPath = docManager.GetAnnotationDoc(minimumQualifiedName, packageName) ?? string.Empty;
+                        var isBuiltInByPath = !string.IsNullOrEmpty(packageName) && ViewModel.IsBuiltInDocPath(mdPath);
+                        var isOwnedByPackage = !string.IsNullOrEmpty(packageName) && !isBuiltInByPath;
+
+                        var sampleGraphPath = string.IsNullOrWhiteSpace(mdPath)
+                            ? string.Empty
+                            : ViewModel.DynamoGraphFromMDFilePath(mdPath, isOwnedByPackage);
+
+                        var category = entry.FullCategoryName ?? string.Empty;
+                        var library = GetLibraryName(category);
+
+                        auditRows.Add(new NodeHelpAuditRowDto(
+                            library,
+                            category,
+                            entry.Name ?? string.Empty,
+                            entry.FullName ?? string.Empty,
+                            mdPath,
+                            sampleGraphPath));
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+
+                // Only file I/O and string building on the background thread.
                 _ = Task.Run(() =>
                 {
                     try
@@ -477,42 +512,27 @@ namespace Dynamo.DocumentationBrowser
                         }
                         csv.AppendLine(csvHeader);
 
-                        foreach (var entry in entries)
+                        foreach (var row in auditRows)
                         {
                             try
                             {
-                                var node = entry.CreateNode();
-                                var minimumQualifiedName = DynamoViewModel.GetMinimumQualifiedName(node);
-                                var packageName = ResolvePackageName(entry, packageRoots, packageAssemblies);
+                                var missingMd = string.IsNullOrWhiteSpace(row.MdPath) || !File.Exists(row.MdPath);
+                                var missingDyn = string.IsNullOrWhiteSpace(row.SampleGraphPath) || !File.Exists(row.SampleGraphPath);
 
-                                var mdPath = docManager.GetAnnotationDoc(minimumQualifiedName, packageName) ?? string.Empty;
-                                var isBuiltInByPath = !string.IsNullOrEmpty(packageName) && ViewModel.IsBuiltInDocPath(mdPath);
-                                var isOwnedByPackage = !string.IsNullOrEmpty(packageName) && !isBuiltInByPath;
-
-                                var sampleGraphPath = string.IsNullOrWhiteSpace(mdPath)
-                                    ? string.Empty
-                                    : ViewModel.DynamoGraphFromMDFilePath(mdPath, isOwnedByPackage);
-
-                                var missingMd = string.IsNullOrWhiteSpace(mdPath) || !File.Exists(mdPath);
-                                var missingDyn = string.IsNullOrWhiteSpace(sampleGraphPath) || !File.Exists(sampleGraphPath);
-
-                                var imagePaths = GetImagePathsFromMarkdownFile(mdPath);
+                                var imagePaths = GetImagePathsFromMarkdownFile(row.MdPath);
                                 var missingImage = imagePaths.Count > 0 && imagePaths.Any(path => !File.Exists(path));
                                 var imagePathsValue = imagePaths.Count == 0 ? string.Empty : string.Join(";", imagePaths);
 
-                                var category = entry.FullCategoryName ?? string.Empty;
-                                var library = GetLibraryName(category);
-
                                 csv.AppendLine(string.Join(",",
-                                    EscapeCsv(library),
-                                    EscapeCsv(category),
-                                    EscapeCsv(entry.Name),
-                                    EscapeCsv(entry.FullName),
+                                    EscapeCsv(row.Library),
+                                    EscapeCsv(row.Category),
+                                    EscapeCsv(row.Name),
+                                    EscapeCsv(row.FullName),
                                     missingMd,
                                     missingDyn,
                                     missingImage,
-                                    EscapeCsv(mdPath),
-                                    EscapeCsv(sampleGraphPath),
+                                    EscapeCsv(row.MdPath),
+                                    EscapeCsv(row.SampleGraphPath),
                                     EscapeCsv(imagePathsValue)));
                             }
                             catch (Exception)
@@ -529,6 +549,29 @@ namespace Dynamo.DocumentationBrowser
             }
             catch (Exception)
             {
+            }
+        }
+
+        /// <summary>
+        /// DTO for one node help audit row. Filled on the UI thread; file I/O and CSV fields derived on the background thread.
+        /// </summary>
+        private sealed class NodeHelpAuditRowDto
+        {
+            internal string Library { get; }
+            internal string Category { get; }
+            internal string Name { get; }
+            internal string FullName { get; }
+            internal string MdPath { get; }
+            internal string SampleGraphPath { get; }
+
+            internal NodeHelpAuditRowDto(string library, string category, string name, string fullName, string mdPath, string sampleGraphPath)
+            {
+                Library = library ?? string.Empty;
+                Category = category ?? string.Empty;
+                Name = name ?? string.Empty;
+                FullName = fullName ?? string.Empty;
+                MdPath = mdPath ?? string.Empty;
+                SampleGraphPath = sampleGraphPath ?? string.Empty;
             }
         }
 

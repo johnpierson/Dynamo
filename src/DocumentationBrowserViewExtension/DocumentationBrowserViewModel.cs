@@ -75,7 +75,7 @@ namespace Dynamo.DocumentationBrowser
                 if (value != oldLink)
                 {
                     UnsubscribeMdWatcher();
-                    WatchMdFile(value.OriginalString);
+                    WatchMdFile(value?.OriginalString, CurrentGraphName, CurrentPackageName);
                 }
 
                 this.link = value;
@@ -327,13 +327,12 @@ namespace Dynamo.DocumentationBrowser
             }
         }
 
-        private void WatchMdFile(string mdLink)
+        private void WatchMdFile(string mdLink, string nodeNamespace, string packageName)
         {
             if (string.IsNullOrWhiteSpace(mdLink))
                 return;
 
-            var fileName = Path.GetFileNameWithoutExtension(mdLink);
-            if (!packageManagerDoc.ContainsAnnotationDoc(fileName))
+            if (!packageManagerDoc.ContainsAnnotationDoc(nodeNamespace ?? string.Empty, packageName ?? string.Empty))
                 return;
 
             markdownFileWatcher = new FileSystemWatcher(Path.GetDirectoryName(mdLink))
